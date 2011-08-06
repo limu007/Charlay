@@ -76,7 +76,8 @@ def get_ids(xb,sub_band):
     return amin,amax
 
 def corr(lst,rep,shift=0,scal=1.,sel=None):
-    '''correlation
+    '''
+    correlation of 2 spectra
     '''
     out=dict()
     if type(scal) not in (list,dict): a=scal
@@ -92,7 +93,10 @@ def corr(lst,rep,shift=0,scal=1.,sel=None):
         else: out[s]=rep[s]*a+b
     return out
     
-def dbload(name='SiO2_gl',freq=None,connection="munz@mono"):
+def dbload(name='SiO2_gl',freq=None,connection="munz@mono",sqlpass=""):
+    '''
+    loading data from NanoCharM repository
+    '''
     from numpy import loadtxt,arange
     if freq!=None:
         if freq[0]>freq[-1]: freq=freq[::-1]
@@ -112,7 +116,7 @@ def dbload(name='SiO2_gl',freq=None,connection="munz@mono"):
         query='select energy,reepsilon,imepsilon from nanoCHARM where vzorek="%s" order by energy;'%name
         import os
         try:
-            aa=os.popen('''echo '%s' | ssh %s "mysql ufkl -u ufklread -p'CTEpris#'"'''%(query,connection))
+            aa=os.popen('''echo '%s' | ssh %s "mysql ufkl -u ufklread -p'%s'"'''%(query,connection,sqlpass))
         except:
             print 'failed '+'''echo '%s' | ssh %s "mysql ufkl "'''%(query,connection)
             return
@@ -142,6 +146,9 @@ def dbload(name='SiO2_gl',freq=None,connection="munz@mono"):
     return data[0],data[1]+1j*data[2]
     
 def dbsave(base,data,mat='t1034_com',skup='metals_meta',matskup=None,connection="munz@mono",nper=10,passwd=None,shi=1):
+    '''
+    saving measured data to SQL server
+    '''
     vars='material,skupina,podskupina,komentar'
     if matskup==None: matskup=mat[:mat.find('_')]
     query='insert into bessy_spectra ('+vars+') values ("'+mat+'","'+skup+'","'+matskup+'","composite spectrum");'
@@ -262,7 +269,7 @@ def filter(dat,xb=None,min_sig=0,sub_band=None,pol_deg=2,min_ampl=1.,init_wid=0,
 
 def basel(lst,rep,bas,lim,ord=1,fit=None):
     '''baseline subtraction below peaks
-    currectly lorentzian/gaussian fit to peaks available
+    currently lorentzian/gaussian fit to peaks available
     lst: list of names
     rep: repository
     bas: x-axis baseline

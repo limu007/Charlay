@@ -124,6 +124,8 @@ class ApplicationWindow(GraphWindow):
         self.tool_menu = QtGui.QMenu(self.tr('&Tools'), self)
         self.tool_menu.addAction(self.tr('&Analysis'), self.showExtra, QtCore.Qt.CTRL + QtCore.Qt.Key_A)
         self.tool_menu.addAction(self.tr('&Variability'), self.variance)
+        self.tool_menu.addAction(self.tr('Tim&ing'), self.timeMeas)
+            
         if rc.scan_extra_menu_experim:
             self.tool_menu.addAction(self.tr('&Scan'), self.scanSample, QtCore.Qt.CTRL + QtCore.Qt.Key_N)
             self.tool_menu.addAction(self.tr('&Thickness (single.meas)'), self.getPeri, QtCore.Qt.CTRL + QtCore.Qt.Key_T)
@@ -482,7 +484,8 @@ class ApplicationWindow(GraphWindow):
             self.emin,self.emax=dd
             if self.instr!=None:
                 self.instr.setup([self.emin,self.emax],integ=self.intime,aver=self.mean,smooth=self.smooth,unit=self.xunit)
-            self.rangeLabel.setText(QString("%s-%s"%tuple([str(s) for s in dd])+units[self.xunit]))
+            self.rangeLabel.setText("%s-%s"%tuple([str(s) for s in dd])+units[self.xunit])
+            #self.rangeLabel.setText(QString("%s-%s"%tuple([str(s) for s in dd])+units[self.xunit]))
         if self.instr!=None:self.instr.measure()
         self.referLabel.setText("dark: none refer: none")
         self.statusBar().showMessage("setup saved")
@@ -518,30 +521,16 @@ class ApplicationWindow(GraphWindow):
                 print('no instrument found')
                 return
             data=self.instr.last
-        comm='#'
-        if type=='matlab': comm='%%'
-        file=open(fname,"w")
-        file.write(comm+" %s\n"%self.expername)
-        if self.expernote!='': file.write(comm+" %s\n"%self.expernote)
-        file.write(comm+" INTEG %.1f AVG %.1f SMOOTH %i\n"%(self.intime,self.mean,self.smooth))
-        if self.termo: file.write(comm+" TEMP %.2f\n"%self.act_temp)
+        comm=[]
+        comm.append(" INTEG %.1f AVG %.1f SMOOTH %i\n"%(self.intime,self.mean,self.smooth))
+        if self.termo: comm.append(" TEMP %.2f\n"%self.act_temp)
+        if self.expernote: comm.apppend(self.expernote+'\n')
         if labels:
-            header=comm+' bin[%s]'%units[self.xunit]
+            header=' bin[%s]'%units[self.xunit]
             if type=='matlab': header+=rc.output_separ+'refer'
             header+=''.join([rc.output_separ+l for l in labels])
-            file.write(header+'\n')
-        from numpy import iterable
-        if xdata==None:xdata=self.instr.pixtable
-        multicol=iterable(data[0]) #are data 1-D or more
-        for i in range(len(data),0,-1):
-            if type=='matlab':
-                if multicol>0: lin=(format+rc.output_separ+"%f"+rc.output_separ+"%s\n")%(xdata[i-1],data[i-1][-1],rc.output_separ.join([format%d for d in data[i-1][:-1]]))
-                else: lin=(format+rc.output_separ+"%f"+"\n")%(xdata[i-1],data[i-1])
-            else:
-                if multicol>0: lin=("%f"+rc.output_separ+"%s\n")%(xdata[i-1],rc.output_separ.join([format%d for d in data[i-1]]))
-                else: lin=("%f"+rc.output_separ+format+"\n")%(xdata[i-1],data[i-1])
-            file.write(lin)
-        file.close()
+            comm.append(header+'\n')
+        self.instr.write(fname,self.expername,comm=comm,data=data,xdata=xdata,type=type,format=format)
 
     def setSaveFileName(self,name=None,do_save=True):
         global save_dir
@@ -805,6 +794,14 @@ class ApplicationWindow(GraphWindow):
         anal_data['peri_disp']=zeros((xdim,ydim))
         anal_data['gpos']=[]
 
+    def timeMeas(self,outname=None):
+        '''timed measurements (instr.pulse)'''
+        from spectrax import TimeDial
+        if not hasattr(self,'timedial'):
+            self.timedial=TimeDial(parent=self)
+        ok=self.timedial.exec_()
+        if ok: self.timedial.pulse()
+            
     def scanSample(self,outname=None):
         '''scanning process using (linear and rotation) motors
         '''
@@ -1020,7 +1017,7 @@ class ApplicationWindow(GraphWindow):
         if self.instr.pixtable==None:
             alert(self,"cannot read pixel data! <b>Please restart spectroscope</b>!")
             return 
-        self.rangeLabel.setText(QString("%i-%i")%tuple(self.instr.pixrange))
+        self.rangeLabel.setText("%i-%i"%tuple(self.instr.pixrange))
         if not auto_init: alert(self,"spectrometer <b>OK</b>!")
         if do_termo:
             try:

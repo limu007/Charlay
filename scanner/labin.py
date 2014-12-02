@@ -9,6 +9,9 @@ per=None # persistent instrument
 serspeed=19200 #38400
 gloud=0
 
+global meas_line #storage for measurements - made global for testing purposes
+meas_line=[]
+
 from scanner import labrc as rc
 def unitconv(ufrom,uto,values):
     from spectra import ev2um
@@ -302,6 +305,164 @@ class specscope(object):
                     print("["+reply+"]")
             return i
         return -1
+        
+    def write(self,fname,expername=None, comm=[],data=None,xdata=None,format='%f',type='ascii'):
+        '''saving data in ascii format'''
+        if data==None: data=self.last
+        colab='#'
+        if type=='matlab': colab='%%'
+        file=open(fname,"w")
+        if expername: file.write(colab+" %s\n"%expername)
+        #if expernote!='': file.write(comm+" %s\n"%expernote)
+        #file.write(comm+" INTEG %.1f AVG %.1f SMOOTH %i\n"%(self.config.m_IntegrationTime,self.mean,self.smooth))
+        for li in comm: file.write(colab+li)
+        from numpy import iterable
+        if xdata==None:xdata=self.pixtable
+        multicol=iterable(data[0]) #are data 1-D or more
+        for i in range(len(data),0,-1):
+            if type=='matlab':
+                if multicol>0: lin=(format+rc.output_separ+"%f"+rc.output_separ+"%s\n")%(xdata[i-1],data[i-1][-1],rc.output_separ.join([format%d for d in data[i-1][:-1]]))
+                else: lin=(format+rc.output_separ+"%f"+"\n")%(xdata[i-1],data[i-1])
+            else:
+                if multicol>0: lin=("%f"+rc.output_separ+"%s\n")%(xdata[i-1],rc.output_separ.join([format%d for d in data[i-1]]))
+                else: lin=("%f"+rc.output_separ+format+"\n")%(xdata[i-1],data[i-1])
+            file.write(lin)
+        file.close()
+
+    def pulse(self,peri=10,dur=100,oname='C:\\Users\\Lenovo\\Documents\\Data\\temp_line',loud=0):
+        from datetime import datetime
+        from time import sleep
+        start=datetime.now()
+        dela=peri/2.
+        act=datetime.now()
+        dis=(act-start).total_seconds()
+        cnt=0
+        while dis<dur:
+            if loud:
+                sys.stdout.write("Tick %f: %f\n"%(dis,dela))
+                sys.stdout.flush()
+            sleep(dela)
+            act=datetime.now()
+            dis=(act-start).total_seconds()
+            if dis//peri>cnt:
+                vals=self.result()
+                cnt+=1
+                dela=peri/2.
+                if oname: self.write(oname+"_%03i.dat"%cnt,comm=[str(act)+"\r\n"])#,array([self.pixtable,self.last]))
+                print("time count %i"%cnt)
+                if self.parent: self.parent.graph.update_measure(instr=self,vals=vals)
+            else:
+                dela=(dis//peri+1)*peri-dis-0.5
+                if dela<0: dela=0.1
+
+    def scan_save(self,xstep=-500,ystep=500,xcnt=50,ycnt=50,radius=0,oname='C:\\Users\\Lenovo\\Documents\\Data\\quad_line',
+                center=False,format='txt',control=None,swapaxes=False,centerfirst=False):
+            ''' 2-d scanning of the sample - saving each row in separate file (given by oname)
+            if radius>0: X-Y coverage of circular wafer
+            if swapaxes: scanning second dir. first
+            if centerfirst: just one point in first line (center)
+            '''
+            from numpy import array,save,zeros,savetxt
+            from math import sqrt
+            import sys
+            from time import sleep
+
+            global gx,gy
+            gx,gy=0,0
+            global meas_line
+            if format=='txt': #hack for saving in text format
+                def save(a,b):
+                    ouf=open(a+".txt","w")
+                    if len(b.shape)>1 and min(b.shape)>1:
+                        ouf.write('#'+'  '.join(["pnt%i"%i for i in range(1,len(b)+1)])+'\n') #writing header
+                    savetxt(ouf,b.transpose(),fmt="%8.5f")
+                    ouf.close()
+            #rate=newrate
+            if swapaxes: xdir,ydir=2,1
+            else: xdir,ydir=1,2
+            if control:
+                control['size']=(xcnt,ycnt)
+                control['nx']=xcnt #is OK for round samples ??
+                control['ny']=ycnt
+                if 'stop' in control: del control['stop']
+            if radius>0: # round sample
+                if center: self.rate(ydir,-radius*ystep)
+                if radius<ycnt-1: ycnt=radius+1
+                if radius<xcnt-1: xcnt=radius+1
+                xmin,xmax=-xcnt+1,xcnt
+                ymin,ymax=-ycnt+1,ycnt
+            else:
+                xmin,xmax=0,xcnt
+                ymin,ymax=0,ycnt
+            for j in range(ymin,ymax):
+                    meas_line=[]
+                    k=0
+                    for i in range(xmin,xmax):
+                        if ((radius>0) and (i**2+j**2)>radius**2) or (centerfirst and i>xmin): 
+                            meas_line.append(zeros(self.pixtable.shape))
+                            # not measuring at this point - empty data
+                            continue
+                        if k!=0: 
+                            self.rate(xdir,xstep)
+                            #print('going '+str(xdir)+' '+str(xstep))
+                        else: k=1  # first point in the line
+                        if control and 'stop' in control: break
+                        ############ measurement #######################
+                        meas_line.append(self.result())
+                        #print('just measured %i %i'%(i,j))
+                        if control:
+                            if 'wait' in control: sleep(control['wait']) 
+                            control['x']=i
+                            control['y']=j
+                            control['gx']=gx
+                            control['gy']=gy
+                            if 'meas_evt' in control: control['meas_evt'].set() #starting everything that should come with new measurement
+                            if 'queue' in control: control['queue'].put('measured %i %i'%(i,j)) #synchronization for GUI
+                            if 'anal_evt' in control: # waiting for analysis to end
+                                control['anal_evt'].wait()
+                                control['anal_evt'].clear()
+                            if 'stop' in control: break
+                            if 'refer' in control and control['refer']==1:
+                                if j==-ycnt+1: #save calibration
+                                    if self.flat!=None: self.flat*=array(meas_line[-1])
+                                    else: self.flat=array(meas_line[-1])
+                                    self.last=1
+                                    control['refer']==0
+                            if 'anal' in control: control['anal']() #calling analysis directly, not multitasking
+                            if 'meas_evt' in control: control['meas_evt'].clear()
+                            if rc.single_central_pt and (j==0): break
+                    if control and 'stop' in control: 
+                        print('stop forced, leaving')
+                        break #leaving
+                    if j%2==1: 
+                        meas_line=meas_line[::-1]
+                        #print('line %i inverted'%j)
+                    if radius<=0:
+                        save(oname+"%03i"%(j+1),array(meas_line))
+                    else:
+                        save(oname+"%03i"%(j+ycnt),array(meas_line))
+                        if j>=radius: break
+                        if j<-radius: continue
+                        self.rate(xdir,xstep*(int(sqrt(radius**2-(j+1)**2))-int(sqrt(radius**2-j**2))))
+                    if j<ycnt-1:self.rate(ydir,ystep)
+                    if not(rc.polar_stage and rc.single_central_pt and (j==0)): 
+                        xstep=-xstep
+            if control:
+                if 'meas_evt' in control: 
+                    control['stop']=2
+                    control['meas_evt'].set()
+                if 'queue' in control: control['queue'].put('finished')
+                if 'return' in control: # return to the starting position
+                    print('returning from pos %i, %i (%i, %i)'%(i,j,xmin,ymin))
+                    self.rate(ydir,-ystep*(j-ymin))
+                    ymod=rc.single_central_pt and 1 or 0
+                    if (j-ymin)%2==ymod: self.rate(xdir,xstep*(i-xmin),wait=-1) #odd number of x-scans
+                    control['x']=xmin
+                    control['y']=ymin
+                    xstep=-xstep
+            if hasattr(self,'pixtable'): #saving calibration data
+                if self.flat==None: save(oname+"calib",self.pixtable)
+                else: save(oname+"calib",array([self.pixtable,self.flat]))
 
 class avantes(specscope):
     '''developped and tested for AvaSpec 3648
@@ -570,124 +731,14 @@ class linuscope(avantes):
         self.device.write("END\n");self.device.flush()
         self.device.close()
         
-def check_bord(self,sat_lev=14000):
-    #border reached
-    from numpy import array
-    data=self.last
-    if sum(data>sat_lev)>10: 
-        print('saturating')
-        self.config.m_IntegrationTime=int(self.config.m_IntegrationTime*0.8)
+    def check_bord(self,sat_lev=14000):
+        #border reached
+        from numpy import array
+        data=self.last
+        if sum(data>sat_lev)>10: 
+            print('saturating')
+            self.config.m_IntegrationTime=int(self.config.m_IntegrationTime*0.8)
 
-global meas_line #storage for measurements - made global for testing purposes
-meas_line=[]
-def scan_save(self,xstep=-500,ystep=500,xcnt=50,ycnt=50,radius=0,oname='C:\\Users\\Lenovo\\Documents\\Data\\quad_line',
-            center=False,format='txt',control=None,swapaxes=False,centerfirst=False):
-        ''' 2-d scanning of the sample - saving each row in separate file (given by oname)
-        if radius>0: X-Y coverage of circular wafer
-        if swapaxes: scanning second dir. first
-        if centerfirst: just one point in first line (center)
-        '''
-        from numpy import array,save,zeros,savetxt
-        from math import sqrt
-        import sys
-        from time import sleep
-
-        global gx,gy
-        gx,gy=0,0
-        global meas_line
-        if format=='txt': #hack for saving in text format
-            def save(a,b):
-                ouf=open(a+".txt","w")
-                if len(b.shape)>1 and min(b.shape)>1:
-                    ouf.write('#'+'  '.join(["pnt%i"%i for i in range(1,len(b)+1)])+'\n') #writing header
-                savetxt(ouf,b.transpose(),fmt="%8.5f")
-                ouf.close()
-        #rate=newrate
-        if swapaxes: xdir,ydir=2,1
-        else: xdir,ydir=1,2
-        if control:
-            control['size']=(xcnt,ycnt)
-            control['nx']=xcnt #is OK for round samples ??
-            control['ny']=ycnt
-            if 'stop' in control: del control['stop']
-        if radius>0: # round sample
-            if center: self.rate(ydir,-radius*ystep)
-            if radius<ycnt-1: ycnt=radius+1
-            if radius<xcnt-1: xcnt=radius+1
-            xmin,xmax=-xcnt+1,xcnt
-            ymin,ymax=-ycnt+1,ycnt
-        else:
-            xmin,xmax=0,xcnt
-            ymin,ymax=0,ycnt
-        for j in range(ymin,ymax):
-                meas_line=[]
-                k=0
-                for i in range(xmin,xmax):
-                    if ((radius>0) and (i**2+j**2)>radius**2) or (centerfirst and i>xmin): 
-                        meas_line.append(zeros(self.pixtable.shape))
-                        # not measuring at this point - empty data
-                        continue
-                    if k!=0: 
-                        self.rate(xdir,xstep)
-                        #print('going '+str(xdir)+' '+str(xstep))
-                    else: k=1  # first point in the line
-                    if control and 'stop' in control: break
-                    ############ measurement #######################
-                    meas_line.append(self.result())
-                    #print('just measured %i %i'%(i,j))
-                    if control:
-                        if 'wait' in control: sleep(control['wait']) 
-                        control['x']=i
-                        control['y']=j
-                        control['gx']=gx
-                        control['gy']=gy
-                        if 'meas_evt' in control: control['meas_evt'].set() #starting everything that should come with new measurement
-                        if 'queue' in control: control['queue'].put('measured %i %i'%(i,j)) #synchronization for GUI
-                        if 'anal_evt' in control: # waiting for analysis to end
-                            control['anal_evt'].wait()
-                            control['anal_evt'].clear()
-                        if 'stop' in control: break
-                        if 'refer' in control and control['refer']==1:
-                            if j==-ycnt+1: #save calibration
-                                if self.flat!=None: self.flat*=array(meas_line[-1])
-                                else: self.flat=array(meas_line[-1])
-                                self.last=1
-                                control['refer']==0
-                        if 'anal' in control: control['anal']() #calling analysis directly, not multitasking
-                        if 'meas_evt' in control: control['meas_evt'].clear()
-                        if rc.single_central_pt and (j==0): break
-                if control and 'stop' in control: 
-                    print('stop forced, leaving')
-                    break #leaving
-                if j%2==1: 
-                    meas_line=meas_line[::-1]
-                    #print('line %i inverted'%j)
-                if radius<=0:
-                    save(oname+"%03i"%(j+1),array(meas_line))
-                else:
-                    save(oname+"%03i"%(j+ycnt),array(meas_line))
-                    if j>=radius: break
-                    if j<-radius: continue
-                    self.rate(xdir,xstep*(int(sqrt(radius**2-(j+1)**2))-int(sqrt(radius**2-j**2))))
-                if j<ycnt-1:self.rate(ydir,ystep)
-                if not(rc.polar_stage and rc.single_central_pt and (j==0)): 
-                    xstep=-xstep
-        if control:
-            if 'meas_evt' in control: 
-                control['stop']=2
-                control['meas_evt'].set()
-            if 'queue' in control: control['queue'].put('finished')
-            if 'return' in control: # return to the starting position
-                print('returning from pos %i, %i (%i, %i)'%(i,j,xmin,ymin))
-                self.rate(ydir,-ystep*(j-ymin))
-                ymod=rc.single_central_pt and 1 or 0
-                if (j-ymin)%2==ymod: self.rate(xdir,xstep*(i-xmin),wait=-1) #odd number of x-scans
-                control['x']=xmin
-                control['y']=ymin
-                xstep=-xstep
-        if hasattr(self,'pixtable'): #saving calibration data
-            if self.flat==None: save(oname+"calib",self.pixtable)
-            else: save(oname+"calib",array([self.pixtable,self.flat]))
     
 
 class linkam():

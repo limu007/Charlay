@@ -89,7 +89,7 @@ class ScanDial(QtGui.QDialog):
         else: 
             centerfirst=self.ch_centerf.checkState()>=1
             rad=0
-        from .labin import scan_save
+        #from .labin import scan_save
         #self.parent.control['return']=0
         
         if self.ch_return.checkState()>=1: self.parent.control['return']=1
@@ -108,9 +108,9 @@ class ScanDial(QtGui.QDialog):
         def myscan(control={}):
             print('running scan_save(%i,%i,%i,%i,%s,center=%s,rad=%i)'%(rc.base_xdir*ixstep,iystep,xnum,ynum,oname,str(center),rad))
             if swap:
-                return scan_save(self.parent.instr,iystep,rc.base_xdir*ixstep,ynum,xnum,oname=oname,center=center,radius=rad,control=control,swapaxes=True)
+                return self.parent.instr.scan_save(iystep,rc.base_xdir*ixstep,ynum,xnum,oname=oname,center=center,radius=rad,control=control,swapaxes=True)
             else:
-                return scan_save(self.parent.instr,rc.base_xdir*ixstep,iystep,xnum,ynum,oname=oname,center=center,radius=rad,control=control,swapaxes=False)
+                return self.parent.instr.scan_save(rc.base_xdir*ixstep,iystep,xnum,ynum,oname=oname,center=center,radius=rad,control=control,swapaxes=False)
         if self.parent.multitask:
             self.parent.control['meas_evt']=Event()
             return ConThread(control=self.parent.control,exe=myscan)#target=myscan)#,Thread(target=myanal)
@@ -153,6 +153,29 @@ class ScanDial(QtGui.QDialog):
         if rep>=9: alert(self,'Not able to go %i steps Y-dir'%move,'Motor failure',loud=1)
         
 
+class TimeDial(QtGui.QDialog):
+    parent=None
+    #save_dir="C:\\Data\\SOI\\"
+    def __init__(self, *args,**kwargs):
+        from PyQt4 import uic
+        QtGui.QWidget.__init__(self, *args)
+        uic.loadUi(rc.inst_dir+"timing.ui", self)
+        self.setWindowTitle('Timing measurement')
+        if 'parent' in kwargs: self.parent=kwargs['parent']
+    def can_start(self):
+        self.buttonBox.buttons()[0].setDisabled(0)
+    def select_file(self):
+        from .spectrac import save_dir
+        self.fileName=self.parent.fileDialog.getSaveFileName(self,self.tr("Saving data"),
+            save_dir,self.tr("Text files (*)"))
+        if self.fileName.isEmpty(): return
+        self.outname.setText(self.fileName)#toAscii()
+        import os
+        #save_dir=os.path.dirname(str(self.outname.text()))
+        self.can_start()
+    def pulse(self):
+        self.parent.instr.pulse(peri=self.periBox.value(),dur=self.totBox.value(),oname=str(self.outname.text()))
+        
 from math import pi,cos,sin
 
 class ScanMap(QtGui.QMainWindow):

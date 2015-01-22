@@ -11,7 +11,8 @@ from matplotlib.figure import Figure
 from matplotlib.widgets import SpanSelector 
 
 from numpy import arange
-from . import labrc as rc
+#from . 
+import labrc as rc
 
 fluid_lims=False #can change vertical limits interactively?
 
@@ -229,7 +230,7 @@ class GraphWindow(QtGui.QMainWindow):
     def grange(self):
         '''plot range'''
         if self.randial==None: 
-            from .spectrax import RangeDial
+            from spectrax import RangeDial
             self.randial=RangeDial(self.graph.axes)
         else:
             self.randial.read_axes(self.graph.axes)

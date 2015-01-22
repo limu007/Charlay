@@ -28,12 +28,42 @@ def dielect(freq,einf,osci,etauc=None,drude=None):#,n0=1.,rep=-1,ang=0,polar='s'
     e=zeros(len(freq),dtype='complex128')
     for o in osci:
         if len(o)<3:
-            print '3rd parameter should be a list of 3-tuples'
+            print('3rd parameter should be a list of 3-tuples')
             return
-        e+=o[0]/(o[1]**2-freq**2-1j*o[2]*freq)
+        e+=o[0]*o[1]*o[2]/(o[1]**2-freq**2-1j*o[2]*freq)
     if etauc: e*=(freq-etauc)**2
     if einf: e+=einf
     if drude!=None:  e-=drude[0]**2/freq/(freq+1j*drude[1])
+    return e
+
+def dielect_tauc(freq,einf,ampl,e0,egap,cbri,rep=0):
+    '''tauc-lorentz form for single oscillator with gap
+    complicated analytical form - hopefully correct
+    from Jellison Modine APL 69,2137 (1996)  + erratum
+    '''
+    from numpy import zeros,sqrt,arctan,abs,log
+    e=zeros(len(freq),dtype='complex128')
+    alpha=sqrt(4*e0**2-cbri**2)
+    mgam=sqrt(e0**2-cbri**2/2)
+    a_ln=freq**2*(egap**2-e0**2)+egap**2*cbri**2-e0**2*(3*egap**2+e0**2)
+    a_atan=(freq**2-e0**2)*(egap**2+e0**2)+egap**2*cbri**2
+    ksi4=(freq**2-mgam**2)**2+alpha**2*cbri**2/4
+
+    brac1=(egap**2+e0**2+alpha*egap)/(egap**2+e0**2-alpha*egap)
+    brac2=pi-arctan((alpha+2*egap)/cbri)+arctan((alpha-2*egap)/cbri)
+    brac3=pi+2*arctan(2*(mgam**2-egap**2)/alpha/cbri)
+    brac5=abs(freq-egap)*(freq+egap)/sqrt((egap**2-e0**2)**2+egap**2*cbri**2)
+    #ear=[a_ln/2/alpha/e0*log(brac1),-a_atan/e0**2/cbri*brac2]
+    ear=[a_ln/2/alpha/e0**2*log(brac1),-a_atan/e0**2/cbri*brac2]
+    #ear+=[2*egap*(freq**2-mgam**2)/alpha/cbri*brac3]
+    ear+=[4*egap*(freq**2-mgam**2)/alpha/cbri*brac3]
+    ear+=[-(freq**2+egap**2)/freq*log(abs(freq-egap)/(freq+egap)),2*egap*log(brac5)]
+    if rep==-1: return ear
+    #common factor
+    e.real=sum(ear,0)*ampl*e0*cbri/pi/ksi4
+    sfreq=freq[freq>egap]
+    e[freq>egap]+=1j*(ampl*e0*cbri*(sfreq-egap)**2/((sfreq**2-e0**2)**2+cbri**2*sfreq**2)/sfreq)
+    e+=einf
     return e
 
 def rdielect(freq,einf,osci,drude=None,n0=1.,ang=0,polar='s',rep=1):
@@ -73,7 +103,7 @@ def profiles(x,lore,moment=0,loud=0,recent=False,fwhm=False):
             x0=(x*y).sum()/s0
             z=x-x0
             v=x-x0
-            if loud>0: print 'centered %.2f '%x0
+            if loud>0: print('centered %.2f '%x0)
         else:
             z=x.copy()
             v=x.copy()
@@ -87,7 +117,7 @@ def profiles(x,lore,moment=0,loud=0,recent=False,fwhm=False):
                 p1=cent-(cent-p1)*wid_explo
                 p2=cent-(cent-p2)*wid_explo
                 
-            if loud>0: print "width %.2f [%i bins]"%(fwid,len(x)-p2-p1)
+            if loud>0: print("width %.2f [%i bins]"%(fwid,len(x)-p2-p1))
             rep.append(fwid)
             y=y[p1:-p2]
             z=z[p1:-p2]
@@ -116,19 +146,37 @@ def comp_profile(z,rang=[-100,100]):
 ######### MIXING METHODS ##########################
 
 def garnett(e_i,e_m,delt=0.1,depol=1):
-    #spherical/elipsoidal inclusions in matrix
-    return e_m*(e_i*(1 + 2*delt) - e_m*(2*delt - 2))/(e_m-(e_m-e_i)*depol*(1 - delt))
+    '''
+    spherical/elipsoidal inclusions in matrix
+    Maxwell-Garnett model
+    '''
+    e_f=e_m*(e_i*(1 + 2*delt) - e_m*(2*delt - 2))
+    #e_f/=e_m-(e_m-e_i)*depol*(1 - delt)
+    e_f/=e_m*(2+delt)+e_i*depol*(1 - delt)
+    return e_f 
 def brugemann(e_i,e_m,delt=0.1):
-    from numpy import sqrt
     #solve(delt*(e_i-e_f)/(2*e_f+e_i)-(delt-1)*(e_m-e_f)/(2*e_f+e_m))
+    from numpy import sqrt
+    def qsolve(a,b,c):
+        return (-b+sqrt(b**2-4*a*c))/2/a
+    return qsolve(2,e_i-2*e_m+delt*(e_m-e_i)*3,-e_m*e_i)
     e_f=e_m/2 - e_i/4 - 3*delt*(e_m+e_i)/4
     e_f+= sqrt((4+18*delt)*e_i*e_m + (1- 6*delt)*e_i**2 + (4 -12*delt)*e_m**2  + 9*delt**2*e_i**2 + 9*delt**2*e_m**2 - 18*e_i*e_m*delt**2)/4
     return e_f
 def ll(e_i,e_m,delt=0.1):
+    """
+
+    :param e_i: inclusion dielectric
+    :param e_m: bulk dielectric
+    :param delt: fraction of inclusion
+    :return:
+    """
     from numpy import pow
     return pow(delt*pow(e_i,1/3.)+(1-delt)*pow(e_m,1/3.),3.)
 def cpa(e_i,e_m,delt=0.1):
-    #solve((e_f-e_m)*(3*e_f-(1-delt)*(e_i-e_m))-3*e_f*delt*(e_i-e_m))
+    '''general form
+    solve((e_f-e_m)*(3*e_f-(1-delt)*(e_i-e_m))-3*e_f*delt*(e_i-e_m))
+    '''
     from numpy import sqrt
     e_f=e_m/3 + e_i/6 - delt*(e_m+e_i)/3 
     e_f+=sqrt(-8*e_i*e_m + 16*delt*e_i*e_m + e_i**2 + 16*e_m**2 - 20*delt*e_m**2 + 4*delt*e_i**2 + 4*delt**2*e_i**2 + 4*delt**2*e_m**2 - 8*e_i*e_m*delt**2)/6
@@ -146,7 +194,7 @@ def reflect(e,n0=1.,rep=-1,ang=0,polar='s'):
     n=sqrt(e)
     if all(ang==0): 
         #print 'normal'
-        r=(n0-n)/(n0+n)
+        r=(n0-n)/(n0+n) # (1-n^2-k^2- 2ik)/((1+n)^2+k^2)
     else:
         cang=cos(ang*pi/180)
         canh=sqrt(1-n0**2*(1-cang**2)/n**2) # snell's law
@@ -179,7 +227,7 @@ def friter(r,sh,psi=None,ang=0,aver=False):
 
 global n,k,alpha,psi
 psi=[]
-def plate(freq,epsil,width,ang=0,polar='s',n0=1.,rep=0,aver=False,unit='eV'):
+def plate(freq,epsil,width,ang=0,polar='s',n0=1.,rep=1,aver=False,unit='eV'):
     '''response from (a) planparalel plate(s)
     frequency in eV (default), cm-1 or in PHz (1e15 Hz)
     width in nm (1e-9m)
@@ -189,6 +237,7 @@ def plate(freq,epsil,width,ang=0,polar='s',n0=1.,rep=0,aver=False,unit='eV'):
 
     if rep=-1: returns precalculated reflectivites on interfaces and phase shifts
             if ang>0: also returns "psi" (reflected angles)
+    if rep=0: returns complex (fresnel coef.)
     '''
     global n,k,alpha,psi
     from numpy import abs,sqrt,cos,array,zeros,ndarray
@@ -204,16 +253,21 @@ def plate(freq,epsil,width,ang=0,polar='s',n0=1.,rep=0,aver=False,unit='eV'):
     psi=[]
     i=0
     if unit=='PHz': mfrq=freq/c0*1e6
-    elif unit=='cm': mfrq=1e7/freq 
-    else: mfrq=freq*ev2um*1e-3
+    elif unit=='cm': mfrq=1e-7*freq 
+    else: mfrq=(freq*ev2um*1e-3)
     for e in epsil: # calculate fresnel coef., widths and angles at each interface
         n=sqrt(e)
         if i<len(width): sh.append(mfrq*2*pi*n*width[i])
         if ang!=0:
-            if cang==None: cang=cos(ang*pi/180)
+            if cang==None: cang=cos(ang*pi/180.)
             else: cang=canh # output angle from previous layer
             psi.append(cang)
-            canh=sqrt(1-(n0.real)**2*(1-cang**2)/(n.real)**2) #cos of angle below the interface
+            #ang below - check the total reflection
+            canh=sqrt(1-n0**2*(1-cang**2)/n**2)
+            # bang=(n0.real)**2*(1-cang**2)/(n.real)**2
+            # if all(bang<1):
+                # canh=sqrt(1-bang) #cos of angle below the interface
+            # else: break # ERR: not correct - some wavelengths will pass
             if polar=='p': rs=(n*cang-n0*canh)/(n*cang+n0*canh) # in fact rs is rp, just to save one variable
             else: rs=(n0*cang-n*canh)/(n0*cang+n*canh)
             if ang<0: 
@@ -242,23 +296,14 @@ def plate(freq,epsil,width,ang=0,polar='s',n0=1.,rep=0,aver=False,unit='eV'):
     if rep==-1: 
         if ang==0: return r,sh,None
         else: return r,sh,psi
-    elif rep==1: return friter(r,sh,psi,ang=ang,aver=aver)
+    elif rep==0: return friter(r,sh,psi,ang=ang,aver=aver)
     return abs(friter(r,sh,psi,ang=ang,aver=aver))**2
 
 global delt,pl
 
 def tensor_plate(freq,epsil,width,rep=0,meth=1,n0=1.,ang=0):
-    """
-
-    :param freq: bin-position
-    :param epsil: dielectric of materials
-    :param width:
-    :param rep:
-    :param meth:
-    :param n0:
-    :param ang:
-    :return:
-    """
+    '''using tensor algebra
+    '''
     from numpy import array,ones,zeros,sqrt,conj
     from math import cos,sin
     from algebra import tensor
@@ -365,9 +410,11 @@ def gradient(epsil,grange=[0.,1.],ndiv=30,meth=garnett,freq=None,width=1000):
     lays=[meth(epsil[0],epsil[1],a) for a in linspace(grange[0],grange[1],ndiv)]
     ways=ones(ndiv)*width/ndiv
     if freq==None: return lays,ways
-    return plate(freq,lays,list(ways)[:-1],rep=1)
+    return plate(freq,lays,list(ways)[:-1],rep=0)
     
 def calc_ellips(epsil,n0=1.,rep=-1,ang=45,conv=1,to_fourier=None):
+    '''ellipsometry angles from dielect. function
+    '''
     from ellipse import calc_fourier
     from numpy import arctan2
     frac=reflect(epsil,n0,rep=0,ang=ang,polar='p')/reflect(epsil,n0,rep=0,ang=ang,polar='s')
@@ -385,7 +432,7 @@ def calc_ellips(epsil,n0=1.,rep=-1,ang=45,conv=1,to_fourier=None):
     if rep==1: return out[0]+1j*out[1]
     else: return out
 
-def calc_ellips_plate(freq,epsil,wid=[],ang=60,conv=1,rep=0,corr=None):
+def calc_ellips_plate(freq,epsil,wid=[],ang=60,conv=1,rep=1,corr=None):
     '''calculates ellipsometric angles for given layers'''
     from numpy import arctan,arctan2,abs
     if conv: conv=180./pi
@@ -397,13 +444,13 @@ def calc_ellips_plate(freq,epsil,wid=[],ang=60,conv=1,rep=0,corr=None):
             fr=plate(freq,epsil,wid,ang=ang,rep=-1)
             zz=friter([f[:,0] for f in fr[0]],fr[1],fr[2])/friter([f[:,1] for f in fr[0]],fr[1],fr[2])
         else:
-            zz=plate(freq,epsil,wid,ang=ang,rep=1,polar='p')
-            zz/=plate(freq,epsil,wid,ang=ang,rep=1,polar='s')
+            zz=plate(freq,epsil,wid,ang=ang,rep=0,polar='p')
+            zz/=plate(freq,epsil,wid,ang=ang,rep=0,polar='s')
     if rep==-2: return zz
     out=arctan(abs(zz))*conv,-arctan2(zz.imag,zz.real)*conv
     if corr=='pos':
         out[1][out[1]<-90]+=360.
-    if rep==1: return out[0]+1j*out[1]
+    if rep==0: return out[0]+1j*out[1]
     else: return out
 
 global plout
@@ -414,7 +461,7 @@ def selpoint(x,meas,epsil=[10+4j,2.5,10+2j],vari=[1,0,2],wid=[230,60.],angs=[60,
 	vepsil=zeros((len(epsil),max(vari)))
 	for i in range(len(vari)): 
 		if vari[i]>0:vepsil[i,vari[i]-1]=1
-	fuc=lambda p,k:array([calc_ellips_plate(x[k],epsil+dot(vepsil,p),wid,rep=1,ang=a) for a in angs])
+	fuc=lambda p,k:array([calc_ellips_plate(x[k],epsil+dot(vepsil,p),wid,rep=0,ang=a) for a in angs])
 	if rep==1: return fuc
 	from scipy import optimize
 	plout=[zeros(max(vari))]
@@ -437,10 +484,10 @@ def multipoint(dang,wids,weig=None,repeaf=None,xpts=None,ypts=None,poly_deg=2,al
             if type(xpts)==list: xpts=alog.base[xpts]
             ualc=array([polyval(a,xpts) for a in valc])
             if rep==1: return xpts,ualc
-            print 'fitted for polynom deg %i'%poly_deg
+            print('fitted for polynom deg %i'%poly_deg)
             if check:
                 for j in range(len(dang)):
-                    print 'ang %i:chi2 %.4f'%(dang[j],sum((polyval(valc[j],alog.base)-alog[aform%dang[j]])**2))
+                    print('ang %i:chi2 %.4f'%(dang[j],sum((polyval(valc[j],alog.base)-alog[aform%dang[j]])**2)))
     if weig==None: weig=ones(len(dang))
     if ypts!=None: #p0=list(ypts.real.flat)+list(ypts.imag.flat)+list(wids)
         p0=list(array([ypts.real,ypts.imag]).swapaxes(0,2).swapaxes(0,1).flat)+wids
@@ -453,10 +500,10 @@ def multipoint(dang,wids,weig=None,repeaf=None,xpts=None,ypts=None,poly_deg=2,al
     feps=lambda p:dot(array(p[:neps*len(xpts)*2]).reshape(neps,len(xpts),2),array([1,1j]))
     if dowid:
         from ellipse import calc_ellips_plate
-        wfit=lambda p:sum([sum(abs(calc_ellips_plate(xpts,feps(p)[repeaf],p[-len(wids):],ang=dang[i],rep=1,corr='pos')-ualc[i]))*weig[i] for i in range(len(dang))])
+        wfit=lambda p:sum([sum(abs(calc_ellips_plate(xpts,feps(p)[repeaf],p[-len(wids):],ang=dang[i],rep=0,corr='pos')-ualc[i]))*weig[i] for i in range(len(dang))])
         return wfit,p0
     else:
-        wfit=lambda p:sum([sum(abs(calc_ellips_plate(xpts,feps(p)[repeaf],wids,ang=dang[i],rep=1,corr='pos')-ualc[i]))*weig[i] for i in range(len(dang))])
+        wfit=lambda p:sum([sum(abs(calc_ellips_plate(xpts,feps(p)[repeaf],wids,ang=dang[i],rep=0,corr='pos')-ualc[i]))*weig[i] for i in range(len(dang))])
         return wfit,p0[:-len(wids)]
     #ival=(p0!=None) and wfit(p0) or None
     # fitting only the width: dfit=lambda p:a(p0[:-2]+[p[0],p[1]])
@@ -529,29 +576,29 @@ def scan(fit,pars,ndiv=20,multi=False,imin=0,loud=0,ret=0):
             if multi:
                 j=0
                 for d in p:
-                    if loud:print 'now %i:'%i+str(pars[:i]+[d]+pars[i+1:])
+                    if loud:print('now %i:'%i+str(pars[:i]+[d]+pars[i+1:]))
                     rep.extend(scan(fit,pars[:i]+[d]+pars[i+1:],imin=i+1,loud=loud,ndiv=ndiv,ret=-j))
                     j+=1
                 if ret>=0: dims.append(p)
                 break
             else:
                 rep.extend([fit(pars[:i]+[d]+pars[i+1:]) for d in p])
-                if loud:print str(pars[:i]+[d]+pars[i+1:])
+                if loud:print(str(pars[:i]+[d]+pars[i+1:]))
                 if ret>=0: dims.append(p)
     if len(rep)==0: 
         try:
             rep=[fit(pars)]
-            if loud:print pars
+            if loud:print(pars)
         except:
-            print 'error '+str(pars)
+            print('error '+str(pars))
     else:
         if ret==2: return dims
         elif ret==1:
-            print 'calculating position of minima'
+            print('calculating position of minima')
             pos=[]
             ipos=argmin(rep)
             for d in dims:
-                print 'now pos %i - min at %i'%(ipos,ipos%len(d))
+                print('now pos %i - min at %i'%(ipos,ipos%len(d)))
                 pos.append(d[ipos%len(d)])
                 ipos/=len(d)
             return pos
@@ -578,12 +625,12 @@ def dofit(x,y,pars,lims=[[1e-2,1e6],[1,4000.],[0.001,100.]],yerr=None,einf=1.,dr
         if len(y.shape)==2 and y.shape[1]==2: 
             y=y[:,0]+1j*y[:,1]
             if yerr!=None: weight=1/yerr[:,0]+1j/yerr[:,1]
-            print "fitting complex numbers: ellipsometry"
+            print("fitting complex numbers: ellipsometry")
             #dierep=
         elif str(y.dtype)[:7]=='complex': 
             dierep=0 # calculating in complex plane
             if yerr!=None: weight=1/yerr.real+1j/yerr.imag
-            print "fitting complex numbers"
+            print("fitting complex numbers")
         else:
             if yerr!=None: weight=1/yerr
         if drude!=None:
@@ -619,7 +666,7 @@ def dofit(x,y,pars,lims=[[1e-2,1e6],[1,4000.],[0.001,100.]],yerr=None,einf=1.,dr
             if drude!=None: blims+=[[0.1,100],[0.1,100.]]
             if len(lims)==len(ipars)-1: blims+=lims
             elif len(lims)==3:
-                print 'setting limits'
+                print('setting limits')
                 for i in range(len(pars)):
                     for j in range(3):
                         if lims[j][0]<0: blims.append([pars[i,j,0]+a for a in lims[j]])
@@ -642,9 +689,10 @@ def ptbypt(meas,dang,freq,nlay=1):
     '''gets epsilon and layer thickness from ellips. measurements at different angles
     point-by-point
     '''
-    dfit=lambda p,w:sum([abs(calc_ellips_plate(freq,p,w,ang=dang[i],rep=1)-meas[i])**2 for i in range(len(dang))])
+    dfit=lambda p,w:sum([abs(calc_ellips_plate(freq,p,w,ang=dang[i],rep=0)-meas[i])**2 for i in range(len(dang))])
     wfit=lambda q:dfit([q[i]+1j*q[i+1] for i in range(nlay+1)],q[-nlay:])
     return wfit
+    # NOT FINISHED
 
 global fit,idix
 fit=None
@@ -684,7 +732,7 @@ def multifit(x=None,y=None,epsil=None,wid=None,ang=0,mix=None,opti='lbf',yerr=No
         out=fitting(x,y)
         wid[0]=per_conv[0]/((out[0][3]-per_conv[1])*sqrt(epsil[0].real.mean()))
         #wid[0]=per_conv/(out[3]*sqrt(epsil[0].real.mean()))
-        print 'estimated principal layer width %f'%wid[0]
+        print('estimated principal layer width %f'%wid[0])
     if yerr!=None and  all(yerr.real>0): 
         weight=1/yerr.real
         if all(yerr.imag>0): weight+=1j/yerr.imag
@@ -693,7 +741,7 @@ def multifit(x=None,y=None,epsil=None,wid=None,ang=0,mix=None,opti='lbf',yerr=No
         from numpy import convolve,polyfit,polyval
         if smooth!=None:
             y=convolve(y,smooth)[len(smooth):-len(smooth)]
-            print 'data shape %i'%y.shape
+            print('data shape %i'%y.shape)
             def fit(spars,rep=0):
                 global idix
                 #print spars
@@ -784,7 +832,7 @@ def unittest(mode=1,base=1,comp=["SiO2_gl","cSi_asp"],frange=[0.3,3.3],wid=3000)
     else: sel=freq>0
     if mode==1: res=plate
     elif mode==2: res=matter_plate
-    return freq[sel],[va1[sel],va2[sel]],res(freq[sel],[va1[sel],va2[sel]],[wid],meth=0)
+    return freq[sel],[va1[sel],va2[sel]],res(freq[sel],[va1[sel],va2[sel]],[wid])
 
 
 def plotwo(e,idata,fig=None,mode='pd',clean=True,ang=75):

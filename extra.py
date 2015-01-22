@@ -8,9 +8,6 @@
 '''
 
 def join(lists,meth=None):
-    '''
-    merging more lists in one
-    '''
     rep=[]
     for l in lists:
         if l==None: continue
@@ -31,9 +28,7 @@ def uniq(ilist,prop):
     return olist
 
 def get_width(x,y,bord=5,rep=1,sig=1.,mod='gauss'):
-    '''
-    fits a gaussian to a histogram
-    '''
+    '''fits a gaussian'''
     from numpy import log,polyfit,polyval,exp
     vals=y[bord:-bord]
     if mod=='gauss':vals=log(vals)
@@ -53,6 +48,15 @@ from math import log
 
 loud=0
 
+def umean(bb,stdlev=0.05):
+    '''calculates correct uncertainty using student coefficient
+    '''
+    from uncertainties import ufloat
+    from numpy import mean,std
+    from math import sqrt
+    from scipy import stats
+    return ufloat(mean(bb),std(bb)*stats.t(len(bb)).isf(stdlev)/nu.sqrt(len(bb)-1))
+
 global a,b,c
 def get_sigma(data,ndiv=30,min_count=3,min_bins=7,rep=1,nclip=2.,nsig=2.):
     from numpy import histogram,argmax
@@ -65,20 +69,20 @@ def get_sigma(data,ndiv=30,min_count=3,min_bins=7,rep=1,nclip=2.,nsig=2.):
         vstd=sata.std()*nsig
     if len(sata)/10<ndiv: 
         ndiv=max([int(len(sata)/10),10])
-        print 'reducing no. of bins for histog. to %i'%ndiv
+        print('reducing no. of bins for histog. to %i'%ndiv)
     vstp=2*vstd/ndiv
     vmin=vmax-vstd
     vmax=vmax+vstd
     c=arange(vmin,vmax,vstp)
-    if loud: print 'histog. from %4.2f to %4.2f'%(vmin,vmax)
+    if loud: print('histog. from %4.2f to %4.2f'%(vmin,vmax))
     a,b=histogram(data,c)
     if loud>0:
-        if loud>2: print b,a
-        else: print 'histog. sum %i [%i above]'%(sum(a),sum(a>min_count))
+        if loud>2: print(b,a)
+        else: print('histog. sum %i [%i above]'%(sum(a),sum(a>min_count)))
     if sum(a>min_count)<10: bord=2
     else: bord=3
     if sum(a>min_count)<min_bins:
-        print 'too few bins to fit a gausian'
+        print('too few bins to fit a gausian')
         if rep==2: return b[argmax(a[bord:-bord])+bord],(vmax-vmin)/2
         else: return vstd
     #if rep>3: return get_width(b[a>min_count],a[a>min_count],bord=bord,rep=rep),b[a>min_count],a[a>min_count]
@@ -93,7 +97,7 @@ def clipped(val,nsig=3.,nclip=1,loud=0,rep=0):
     for i in range(nclip):
         avg=val[sel].mean()
         std=val[sel].std()
-        if loud>0: print "selecting %f +- %f"%(avg,std*nsig)
+        if loud>0: print("selecting %f +- %f"%(avg,std*nsig))
         sel=abs(val-avg)<std*nsig
         if sum(sel)==len(sel): break # no sense of repeating
     if rep==1: return val[sel].min(),val[sel].max()
@@ -105,7 +109,7 @@ def ints(data,sigma,loud=0,min_wid=1):
     dlen=len(data)
     idi=arange(dlen)[sele]
     if len(idi)==0: 
-        if loud>0:print 'no good bins'
+        if loud>0:print('no good bins')
         return []
     neidiff=idi[1:]-idi[:-1]
     #gstep=pidi[1:]-pidi[:-1]
@@ -117,7 +121,7 @@ def ints(data,sigma,loud=0,min_wid=1):
     gends=list(idi[gidi]+1)
     if gidi[-1]!=len(idi)-1: gends.append(idi[-1]+1)
     gtis=zip(gbegs,gends)
-    if loud>0: print '%i good bins, %i intervals'%(sum(sele),len(gtis))
+    if loud>0: print('%i good bins, %i intervals'%(sum(sele),len(gtis)))
     return [a for a in gtis if a[1]-a[0]>min_wid] #good intervals longer than ...
 
 def mask_data(data,bias,sigma=None):
@@ -150,6 +154,25 @@ def trapezoid(e,e0,e1,w0,w1=-1,sl=None):
     rep/=sum(rep)
     return rep
 
+def normality_check(y,wei=None):
+    n=len(y)
+    from numpy import sum,mean
+    from math import sqrt
+    if wei:
+        wei/=wei.sum()
+        mid=sum(wei*y)
+        sig=sum(wei*(y-mid)**2)
+        skew=sqrt(n)*sum(wei*(y-mid)**3)/(sig**1.5)
+        curt=n*sum(wei*(y-mid)**4)/(sig**2)-3
+    else:
+        mid=sum(y)/n
+        sig=sum((y-mid)**2)
+        skew=sqrt(n)*sum((y-mid)**3)/(sig**1.5)
+        curt=n*sum((y-mid)**4)/(sig**2)-3
+    dskew=6*n*(n-1)/float((n-2)*(n+1)*(n+3))
+    dcurt=24*n*(n-1)**2/float((n-3)*(n-2)*(n+5)*(n+3))
+    return skew/sqrt(dskew)/2.,curt/sqrt(dcurt)/2.
+
 global labs,cnts
 global avgs,xpos
 def ndstats(data,sigma=0,bias=0,xbin=None,errs=None,bin=100,frac_min=0.75,step=None,loud=1):
@@ -168,22 +191,22 @@ def ndstats(data,sigma=0,bias=0,xbin=None,errs=None,bin=100,frac_min=0.75,step=N
             step=bin*median(xbin[1:]-xbin[:-1])
         labs=((xbin-xbin[0])/step).astype(int32)
         if sum(labs<0)>0:
-            print 'x-axis not rising'
+            print('x-axis not rising')
             return [],[],[]
         bin=int(len(xbin)/labs[-1])
-        if loud: print 'using step %.3f, grouping in average by %i bins'%(step,bin) 
+        if loud: print('using step %.3f, grouping in average by %i bins'%(step,bin))
     else: labs=(arange(len(data))/bin).astype(int32)
     if sigma!=None: labs[sele==False]=-1
     cnts=zeros((max(labs)+1,))
-    if loud>1: print "labels [%i-%i], length %i"%(min(labs),max(labs),len(cnts))
+    if loud>1: print("labels [%i-%i], length %i"%(min(labs),max(labs),len(cnts)))
     for l in labs[sele]:
         cnts[l]+=1
     idx=arange(len(cnts))[cnts>=bin*frac_min]
     if len(idx)<1:
-        print "all bins empty"
+        print("all bins empty")
         return None
     else:
-        if loud>0: print "%i bin(s) empty"%(len(cnts)-len(idx))
+        if loud>0: print("%i bin(s) empty"%(len(cnts)-len(idx)))
     #print 'max. index %i'%(labs[-1])
     avgs=ndimage.mean(data,labs,idx)
     if errs!=None: 
@@ -267,16 +290,17 @@ def stats(data,sigma=0,bias=None,xbin=None,errs=None,bin=100,frac_min=0.75,step=
     #errs/=cnts[cnts>bin]
     #errorbar(xpos,avgs,errs)
     
-def polyfit(x,y,r,w=None,full=0):
+def polyfit(x,y,r,w=None,full=0,clip=0,lim=0):
     ''' replacement for matplotlib/numpy polyfit,
     using also weights if needed
     '''
     from numpy.linalg import lstsq
+    from numpy import ones,polyval,abs
     #from numpy.linalg import inv as inverse
     global chi2
     assert type(r)==int
     if len(y)<r+1:
-        print 'too few data to fit a polynom'
+        print('too few data to fit a polynom')
         if full==0: return None    
         else: return None,None,None,None
     arrmat=ones((size(y),r+1),float64)
@@ -288,6 +312,15 @@ def polyfit(x,y,r,w=None,full=0):
     for i in range(r):
         arrmat[:,i+1]=arrmat[:,i]*x
     pars,chi2,rank,eigens=lstsq(arrmat,ymat)
+    if clip>0:
+        resid=abs(y-polyval(pars,x))
+        resid/=resid.mean()
+        if lim>0:
+            sel=resid<lim
+            print("using %i points [%.4f]"%(sum(sel),sum(resid[sel]**2)))
+            return polyfit(x[sel],y[sel],r,w,clip=clip-1,lim=lim,full=full)
+        if w==None: w=ones(x.shape)
+        return polyfit(x,y,r,w/resid,clip=clip-1,full=full)
     if full==0:return pars[::-1]
     return pars[::-1],chi2,rank,eigens
 
@@ -345,9 +378,9 @@ def congrid(a, newdims, method='linear', centre=False, minusone=False):
     old = n.array( a.shape )
     ndims = len( a.shape )
     if len( newdims ) != ndims:
-        print "[congrid] dimensions error. " \
+        print("[congrid] dimensions error. " \
             "This routine currently only support " \
-            "rebinning to the same number of dimensions."
+            "rebinning to the same number of dimensions.")
         return None
     newdims = n.asarray( newdims, dtype=float )
     dimlist = []
@@ -408,9 +441,9 @@ def congrid(a, newdims, method='linear', centre=False, minusone=False):
         newa = scipy.ndimage.map_coordinates(a, newcoords)
         return newa
     else:
-        print "Congrid error: Unrecognized interpolation type.\n", \
+        print("Congrid error: Unrecognized interpolation type.\n", \
             "Currently only \'neighbour\', \'nearest\',\'linear\',", \
-            "and \'spline\' are supported."
+            "and \'spline\' are supported.")
         return None
     
 
@@ -442,7 +475,7 @@ def fill_kde(data,errs,fact=2.,form='gauss',ndiv=100,xbase=None,xlog=False,clip=
         if type(errs)==list: errs=errs[sel]
         #xbase=[data[xids[0]]-errs*fact,data[xids[1]]+errs*fact]
     step=(xbase[1]-xbase[0])/ndiv
-    print 'range %5.2f-%5.2f step:%5.2f'%(xbase[0],xbase[1],step)
+    print('range %5.2f-%5.2f step:%5.2f'%(xbase[0],xbase[1],step))
     if iterable(errs)>0:
         #errm=(max(errs)+min(errs))/2.
         errm=errs[errs>0].mean()
@@ -490,7 +523,7 @@ def fill_kde(data,errs,fact=2.,form='gauss',ndiv=100,xbase=None,xlog=False,clip=
             try:
                 vals[pos:pos+alen]+=kern[nos:nos+alen]
             except:
-                print "casting %i:+%i to %i:+%i (%i / %i)"%(nos,alen,pos,alen,len(vals),len(kern))
+                print("casting %i:+%i to %i:+%i (%i / %i)"%(nos,alen,pos,alen,len(vals),len(kern)))
     return vals,axis
 
 def fill_k2de(xdata,xerrs,ydata,yerrs,fact=2.,form='gauss',xdiv=100,xbase=None,ydiv=100,ybase=None,xlog=False,ylog=False):
@@ -513,7 +546,7 @@ def fill_k2de(xdata,xerrs,ydata,yerrs,fact=2.,form='gauss',xdiv=100,xbase=None,y
         ydiv=(ybase[1]-ybase[0])//ystep
         ybase[1]=ybase[0]+ystep*ydiv
     else: ystep=(ybase[1]-ybase[0])/ydiv
-    print 'step:%5.2f x %5.2f'%(xstep,ystep)
+    print('step:%5.2f x %5.2f'%(xstep,ystep))
     if iterable(xerrs)>0:
         #xerrm=(max(xerrs)+min(xerrs))/2.
         xerrm=xerrs[xerrs>0].mean()
@@ -560,7 +593,7 @@ def fill_k2de(xdata,xerrs,ydata,yerrs,fact=2.,form='gauss',xdiv=100,xbase=None,y
     elif xerrm==0: xvals=exp(-xern**2/2/xerrs**2)
     elif yerrm==0: yvals=exp(-yern**2/2/yerrs**2)
     else:
-        print 'mean errors:%5.2f x %5.2f'%(xerrm,yerrm)
+        print('mean errors:%5.2f x %5.2f'%(xerrm,yerrm))
     xaxis=arange(xbase[0],xbase[1],xstep)
     yaxis=arange(ybase[0],ybase[1],ystep)
     vals=zeros((xdiv,ydiv),dtype=float64)
@@ -615,10 +648,10 @@ def chi2map_anal(arep,grid,shallow=.3,bord_frac=.3,blofit='gauss',rep=0,inparg=N
     smin=arep.argmin()
     spos=[smin//len(grid[0]),smin%len(grid[0])]
     amin=arep[spos[0],spos[1]]
-    print 'min. value %.2f at %i,%i : %.3f,%.3f'%(amin,spos[0],spos[1],grid[0][spos[1]],grid[1][spos[0]])
+    print('min. value %.2f at %i,%i : %.3f,%.3f'%(amin,spos[0],spos[1],grid[0][spos[1]],grid[1][spos[0]]))
     sbord=((arep[0,0]+arep[-1,-1])/2.-amin)*shallow
     if sum(arep-amin>sbord)<arep.size*bord_frac:
-        print 'too flat map'
+        print('too flat map')
         return arep
     if blofit=='origauss':
         from numpy import dot
@@ -687,13 +720,13 @@ def scan_kde(pars,kmap,xaxis,yaxis,grid=None,nstep=20,blofit=False):
         if ybnd[0]+grid[1][0]<yaxis[0] or ybnd[1]+grid[1][-1]>yaxis[-1]: #need to limit the range
             sele=(yval+grid[1][0]>yaxis[0])*(yval+grid[1][-1]<=yaxis[-1])
             if sum(sele)<2:
-                print 'for slope %.3f: out of range'%(pars[0]+dx)
+                print('for slope %.3f: out of range'%(pars[0]+dx))
                 cnt.append(0)
                 rep.append([0.]*len(grid[1]))
                 continue
             yval=yval[sele]
             if loud>1:
-                print 'for slope %.3f: going from %.3f to %.3f: %i'%(pars[0]+dx,yval[0],yval[-1],sum(sele))
+                print('for slope %.3f: going from %.3f to %.3f: %i'%(pars[0]+dx,yval[0],yval[-1],sum(sele)))
             rep.append([kmap[xpos[sele],((yval-yaxis[0]+dy)/ystep).astype(int)].sum() for dy in grid[1]])
             cnt.append(len(yval))
         else:
@@ -769,7 +802,7 @@ def corr_anal(xarr,yarr,xerr=None,yerr=None,xlog=False,ylog=False,selv=None,grid
     if ylog: selv*=yarr>0
     n=sum(selv)
     if n<=2:
-        print 'not enough data'
+        print('not enough data')
         return
     xcor=xarr[selv]
     ycor=yarr[selv]
@@ -820,7 +853,7 @@ def corr_anal(xarr,yarr,xerr=None,yerr=None,xlog=False,ylog=False,selv=None,grid
             wei/=wei.sum()
             arrmat[:,0]*=wei
             ycor2=ycor*wei
-            if loud>2: print "weight:%s"%wei
+            if loud>2: print("weight:%s"%wei)
         else: ycor2=ycor
         for i in range(r):
             arrmat[:,i+1]=arrmat[:,i]*xcor
@@ -833,7 +866,7 @@ def corr_anal(xarr,yarr,xerr=None,yerr=None,xlog=False,ylog=False,selv=None,grid
     if dsum>0:
         eslop=dsum/sqrt(xxcor)
         ebias=dsum*sqrt(1./n+xavg**2/xxcor)
-    print 'correlation (%5.2f) : %5.2f(+-%5.2f) *x + %5.2f(+-%5.2f)'%(dsum,slop,eslop,bias,ebias)
+    print('correlation (%5.2f) : %5.2f(+-%5.2f) *x + %5.2f(+-%5.2f)'%(dsum,slop,eslop,bias,ebias))
     
     if grid==None:
         if loud==2: return corr_dist(xcor,ycor,slop,bias,perp,xerr,yerr)
@@ -848,7 +881,4 @@ def corr_anal(xarr,yarr,xerr=None,yerr=None,xlog=False,ylog=False,selv=None,grid
     #arep=array(rep)
     if blofit:
         return chi2map_anal(array(rep),[grid[0]+slop,grid[1]+bias],blofit=blofit)
-        #v=array([1.,0.,1.,0.,1.])
-        #x=indices((6,6))-array([2.5,2.5]).reshape(2,1,1)
-        #array([a.reshape(36,) for a in idis]).swapaxes(0,1)
     return [grid[0]+slop,grid[1]+bias]

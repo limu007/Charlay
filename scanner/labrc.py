@@ -79,7 +79,7 @@ ref_tables['Si']='C:\Documents and Settings\Kremik\Dokumenty\Python\period\TblRe
 ref_tables['Si-eps']='C:\Documents and Settings\Kremik\Dokumenty\Python\period\si.dat'
 ref_sample=3 # taking every ref_sample point from tables above
 
-scope_interface=None #'/home/optik/avantes/face/usbdir' #Linux workaround
+scope_interface='/home/limu/Code/Extra/Charlay/run' #Linux workaround
 linux_write_delay=0.6 #waiting for all data to arrive
 
 eps_ext={'Si':[-2.61678, [[179.4187,5.41916,0.001],[  16.3506,3.17564,0.12138],   [138.945163, 4.60986142,0.001]]]} # dielect. function models

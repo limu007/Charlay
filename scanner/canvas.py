@@ -45,14 +45,15 @@ class MyMplCanvas(FigureCanvas):
         self.axes.hold(False)
         self.compute_initial_figure()
         FigureCanvas.__init__(self, fig)
-        try:
+        if True:
+        #try:
             self.setParent(parent)
-            FigureCanvas.setSizePolicy(self,
-                    QtGui.QSizePolicy.Expanding,
-                    QtGui.QSizePolicy.Expanding)
+            #FigureCanvas.setSizePolicy(self,
+            #        QtGui.QSizePolicy.Expanding,
+            #        QtGui.QSizePolicy.Expanding)
             FigureCanvas.updateGeometry(self)
-        except:
-            print("simple graphics - beware")
+        #except:
+        #    print("simple graphics - beware")
         self.figure.subplots_adjust(left=0.08,right=0.96)
 
     def clear(self,reset=True):
@@ -297,7 +298,7 @@ class GraphWindow(QtGui.QMainWindow):
         ''' should adjust according to all graphs plotted
         '''
         if exten==0: exten=rc.vert_exten
-        from .spectra import get_ids
+        from spectra import get_ids
         if self.instr: 
             imin,imax=get_ids(self.instr.pixtable,self.graph.axes.get_xlim())
             #print "using range %i / %i"%(imin,imax)

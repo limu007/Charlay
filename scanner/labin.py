@@ -33,8 +33,6 @@ def unitconv(ufrom,uto,values):
 
 
 ######### SPECTROSCOPY #############
-global gx,gy
-gx,gy=0,0
 from ctypes import *
 class DarkCorrectionType(Structure):
     _fields_ = [("m_Enable", c_uint8),
@@ -104,6 +102,8 @@ class specscope(object):
     data={}
     pixrange=[0,-1]
     dirs=[0,0]
+    #global gx,gy
+    gx,gy=0,0
 
     def __init__(self,erange=[1.5,4.5],nbin=None):
         '''range in eV'''
@@ -249,9 +249,9 @@ class specscope(object):
                                             by Arduino
         '''
         from time import sleep
-        global gx,gy
+        #global gx,gy
         if hasattr(self,'motor') and ch==2: # rotation stage by Thorlabs 
-            gy+=nstep
+            self.gy+=nstep
             if testonly: return
             self.motor.relat(nstep)
             if wait>=0: sleep(rc.motor_rot_wait+rc.motor_rot_speed*abs(nstep)) # needs some time to reach the goal
@@ -260,8 +260,8 @@ class specscope(object):
             return 0
         if hasattr(self,'ard') and self.ard!=None: # control by Arduino
             if wait<=0: wait=rc.comm_ard_wait
-            if ch==1: gx+=nstep
-            else: gy+=nstep
+            if ch==1: self.gx+=nstep
+            else: self.gy+=nstep
             if testonly: return
             dirtext=""
             if nstep<0:
@@ -367,8 +367,8 @@ class specscope(object):
             import sys
             from time import sleep
 
-            global gx,gy
-            gx,gy=0,0
+            #global gx,gy
+            self.gx,self.gy=0,0
             global meas_line
             if format=='txt': #hack for saving in text format
                 def save(a,b):
@@ -414,8 +414,8 @@ class specscope(object):
                             if 'wait' in control: sleep(control['wait']) 
                             control['x']=i
                             control['y']=j
-                            control['gx']=gx
-                            control['gy']=gy
+                            control['gx']=self.gx
+                            control['gy']=self.gy
                             if 'meas_evt' in control: control['meas_evt'].set() #starting everything that should come with new measurement
                             if 'queue' in control: control['queue'].put('measured %i %i'%(i,j)) #synchronization for GUI
                             if 'anal_evt' in control: # waiting for analysis to end
@@ -599,9 +599,9 @@ class avantes(specscope):
         if type(nstep)==float: # if not converted before 
                 nstep=int(nstep/rc.xstepsize)
                 #print('going %i steps'%nstep)
-        if ch==1: gx+=nstep
+        if ch==1: self.gx+=nstep
         else: 
-            gy+=nstep
+            self.gy+=nstep
             ch=2
         if nstep<0:
             self.device.AVS_SetDigOut(self.hnd,ch,1)

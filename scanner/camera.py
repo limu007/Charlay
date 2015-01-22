@@ -8,6 +8,9 @@ import sys,os
 global dev,lev_adapt,sub_wind
 dev=None
 sub_wind=None
+global texp
+texp=1
+tcon=1
 
 def initerm():
 	fd = sys.stdin.fileno()
@@ -32,9 +35,71 @@ def save_fits(ofile=None):
     import pyfits
     nl=pyfits.HDUList([pyfits.PrimaryHDU()])
     im=pyfits.ImageHDU(gcont['data'])
+    nl.header["exposure"]=texp
     nl.append(im)
     if ofile==None: ofile=ifile.replace("dat","fits")
     nl.writeto(ofile)
+
+def save_gsf(filename, imagedata,title=None,spl=1.1):
+    """Write a Gwyddion GSF file.
+
+    filename -- Name of the output file.
+    imagedata -- Image data.
+    xres -- Horizontal image resolution.
+    yres -- Vertical image resolution.
+    xreal -- Horizontal physical dimension (optional).
+    yreal -- Vertical physical dimension (optional).
+    xyunits -- Unit of physical dimensions (optional).
+    zunits -- Unit of values (optional).
+    title -- Image title (optional).
+
+    Image data may be passed as any listable object that can be used to form
+    a floating point array.array().  This includes tuples, lists, arrays,
+    numpy arrays and other stuff.
+    """
+    import array, sys, math
+    yres,xres=imagedata.shape
+    xreal,yreal=None,None
+    xyunits,zunits="mm",None
+    
+    data = array.array('f', imagedata.ravel())
+    if len(data) != xres*yres:
+        raise ValueError, "imagedata does not have xres*yres items"
+    isinf = math.isinf
+    isnan = math.isnan
+    for z in data:
+        if isinf(z) or isnan(z):
+            raise ValueError, "GSF files may not contain NaNs and infinities"
+    if sys.byteorder == 'big':
+        data.byteswap()
+    if xreal==None: xreal=.075/266*xres/spl
+    if yreal==None: yreal=.075/266*yres
+    header = ['Gwyddion Simple Field 1.0']
+    header.append('XRes = %u' % xres)
+    header.append('YRes = %u' % yres)
+    if xreal is not None:
+        header.append('XReal = %.12g' % xreal)
+    if yreal is not None:
+        header.append('YReal = %.12g' % yreal)
+    if xyunits is not None:
+        header.append('XYUnits = %s' % xyunits.encode('utf-8'))
+    if zunits is not None:
+        header.append('ZUnits = %s' % zunits.encode('utf-8'))
+    if title is not None:
+        header.append('Title = %s' % title.encode('utf-8'))
+
+    header = ''.join(x + '\n' for x in header)
+    l = len(header)
+    sentinel = bytearray()
+    for j in range(4 - l % 4):
+        sentinel.append(0)
+
+    fh = file(filename, 'wb')
+    fh.write(header)
+    fh.write(sentinel)
+    fh.write(data)
+    fh.close()
+
 
 def sub_quad(data,bin=16,size=None):#[512,768]):
     from numpy import median,r_,newaxis,linalg,indices,ones
@@ -127,9 +192,6 @@ def shutdown():
 
 from time import sleep
 
-global texp
-texp=1
-tcon=1
 def tinput():
     global gcont,texp,lev_adapt,sub_wind
     while 1:

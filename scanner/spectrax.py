@@ -5,8 +5,8 @@
 
 global task,anal_data
 from PyQt4 import QtGui, QtCore
-from .spectrac import save_dir#,change_sizes
-from .canvas import MyStaticMplCanvas,alert
+from spectrac import save_dir#,change_sizes
+from canvas import MyStaticMplCanvas,alert
 
 anal_data={}
 from numpy import log

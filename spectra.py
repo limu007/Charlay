@@ -5,7 +5,7 @@ probably more sophisticated algorithms could be extracted from scipy.signal
 '''
 
 ev2um=0.806554243769
-ev2K=11604.5026029
+ev2K=11604.5026029 # inv. boltzman. constant in eV
 c0=2.99792e8 # lightspeed
 h=4.1356673e-15 # eV s
 wien=2898. # um K - Wien's law
@@ -36,6 +36,8 @@ herz_si=[2.65456e-2,1.23172e-1,3.14906,-2.66511e-8,5.45852e-14,0]
 sell_si=[9.39816e-1,11.6858,8.10461e-3]
 # sellmeyer n=polyval(sell_si[:2],1/l**2)+sell_si[2]*l1**2/(l**2-l1**2) pro l1=1.1071
 
+tau_si=[[1555.9980, 3.33024, 0.393927, 3.081100], [18.1562, 4.21923, 0.53848, 1e-4], [99.71856, 5.20215, 0.494745, 4.63455],0.58772]
+
 def respect(x,e,dir=None):
     # spectral rebinning
     from scipy import interpolate
@@ -50,7 +52,6 @@ def rebin(x,y,nbins=100,type='inter',dir=1):
     '''converting nonuniform (eg. reciprocal) bins (wavelength) to energy
     either simple averaging or spline interpolation
     '''
-    from numpy import arange
     from extra import ndstats
     step=abs(x[0]-x[-1])/nbins
     if len(x)<nbins*2: type='inter'
@@ -76,8 +77,7 @@ def get_ids(xb,sub_band):
     return amin,amax
 
 def corr(lst,rep,shift=0,scal=1.,sel=None):
-    '''
-    correlation of 2 spectra
+    '''correlation
     '''
     out=dict()
     if type(scal) not in (list,dict): a=scal
@@ -93,35 +93,40 @@ def corr(lst,rep,shift=0,scal=1.,sel=None):
         else: out[s]=rep[s]*a+b
     return out
     
-def dbload(name='SiO2_gl',freq=None,connection="munz@mono",sqlpass=""):
-    '''
-    loading data from NanoCharM repository
-    '''
-    from numpy import loadtxt,arange
+def dbload(name='SiO2_gl',freq=None,connection="http"):
+    from numpy import loadtxt,arange,array
     if freq!=None:
         if freq[0]>freq[-1]: freq=freq[::-1]
     if connection=="http":
+        try:
+            import urllib.request as urllib2
+        except ImportError:
+            import urllib2 
+        if name==None:
+            query='http://physics.muni.cz/~munz/nanoCHARM/cgi-bin/base.cgi?show=mater'
+            aa=urllib2.urlopen(query)
+            return [a.strip() for a in aa.readlines()]
         query='http://physics.muni.cz/~munz/nanoCHARM/cgi-bin/base.cgi?show=0&sample=%s&epsil=1'%name
         if freq!=None:
             imin=freq[0]
             imax=freq[-1]
             query+='&emin=%.3f&emax=%.3f'%(imin,imax)
-        import urllib2
         aa=urllib2.urlopen(query)
         if aa==None:
-            print 'cannot load data for '+name
+            print('cannot load data for '+name)
             return
         skip=0
     else:
         query='select energy,reepsilon,imepsilon from nanoCHARM where vzorek="%s" order by energy;'%name
         import os
         try:
-            aa=os.popen('''echo '%s' | ssh %s "mysql ufkl -u ufklread -p'%s'"'''%(query,connection,sqlpass))
+            aa=os.popen('''echo '%s' | ssh %s "mysql ufkl -u ufklread -p'CTEpris#'"'''%(query,connection))
         except:
-            print 'failed '+'''echo '%s' | ssh %s "mysql ufkl "'''%(query,connection)
+            print('failed '+'''echo '%s' | ssh %s "mysql ufkl "'''%(query,connection))
             return
         skip=1
-    data=loadtxt(aa,unpack=True,skiprows=skip)
+    data=array([a.strip().split() for a in aa.readlines()[skip:]]).astype(float).transpose()
+    #data=loadtxt(aa,unpack=True,skiprows=skip)
     if freq!=None:
         from scipy import interpolate
         if False: #not sorted
@@ -132,7 +137,7 @@ def dbload(name='SiO2_gl',freq=None,connection="munz@mono",sqlpass=""):
         else:
             cord=(data[0]>freq[0])*(data[0]<freq[-1])
         if sum(cord)<3:
-            print 'too few points tabulated'
+            print('too few points tabulated')
             return
         if sum(cord)==3:
             pixs=arange(len(cord))[cord]
@@ -146,9 +151,6 @@ def dbload(name='SiO2_gl',freq=None,connection="munz@mono",sqlpass=""):
     return data[0],data[1]+1j*data[2]
     
 def dbsave(base,data,mat='t1034_com',skup='metals_meta',matskup=None,connection="munz@mono",nper=10,passwd=None,shi=1):
-    '''
-    saving measured data to SQL server
-    '''
     vars='material,skupina,podskupina,komentar'
     if matskup==None: matskup=mat[:mat.find('_')]
     query='insert into bessy_spectra ('+vars+') values ("'+mat+'","'+skup+'","'+matskup+'","composite spectrum");'
@@ -157,7 +159,7 @@ def dbsave(base,data,mat='t1034_com',skup='metals_meta',matskup=None,connection=
     fullq=''
     import os
     if passwd==None:
-        print 'need a password'
+        print('need a password')
         return
     for i in range(len(data)):
         fullq+=query%(i+shi,base[i],data[i].real,data[i].imag)
@@ -188,7 +190,7 @@ def filter(dat,xb=None,min_sig=0,sub_band=None,pol_deg=2,min_ampl=1.,init_wid=0,
             amin,amax=get_ids(xb,sub_band)
             ib=xb[amin:amax]
             ae=dat[amin:amax]
-            print 'selecting bins %i:%i'%(amin,amax)
+            print('selecting bins %i:%i'%(amin,amax))
         else:
             ib=xb
             ae=dat
@@ -204,15 +206,15 @@ def filter(dat,xb=None,min_sig=0,sub_band=None,pol_deg=2,min_ampl=1.,init_wid=0,
     if min_ampl<0: return re
     if min_ampl==0:
         min_ampl=re.mean()*5.
-        print 'setting peak lower limit to %.2f'%min_ampl
+        print('setting peak lower limit to %.2f'%min_ampl)
     if do_ints:
         import extra
         reg=extra.ints(re,-min_ampl,min_wid=min_wid) # intervals of Four. spec. above min_ampl
-        print 'found %i intervals [%i bins] - sample length %.1f'%(len(reg),sum([a[1]-a[0] for a in reg]),(ib[-1]-ib[0]))
+        print('found %i intervals [%i bins] - sample length %.1f'%(len(reg),sum([a[1]-a[0] for a in reg]),(ib[-1]-ib[0])))
         if rep=='ints': return reg
         if clean:
             if len(reg)<2:
-                print 'no frequency cleaned (max. %.2f)'%re[10:-10].max()
+                print('no frequency cleaned (max. %.2f)'%re[10:-10].max())
                 if rep==None: return ae
             if reg[0][0]<=1:
                 del reg[0]
@@ -236,11 +238,11 @@ def filter(dat,xb=None,min_sig=0,sub_band=None,pol_deg=2,min_ampl=1.,init_wid=0,
                 if weight: rep.append([2*pi*cent/(ib[-1]-ib[0]),wei])
                 else: rep.append(2*pi*cent/(ib[-1]-ib[0]))
             if 2*r[1]<len(ae):
-                print '%i bins cent %.2f [%.2f] max %.2f'%(r[1]-r[0],cent,2*pi*cent/(ib[-1]-ib[0]),re[r[0]:r[1]].max())
+                print('%i bins cent %.2f [%.2f] max %.2f'%(r[1]-r[0],cent,2*pi*cent/(ib[-1]-ib[0]),re[r[0]:r[1]].max()))
                 #rep.append(cent*(ib[-1]-ib[0])/len(re))
         if enlarg<-2:
             reg2=extra.ints(re,-min_ampl,min_wid=min_wid)
-            print 'found %i extra peaks'%len(reg2)
+            print('found %i extra peaks'%len(reg2))
             reg+=reg2
             if rep!=None:
                 for r in reg2:
@@ -256,11 +258,11 @@ def filter(dat,xb=None,min_sig=0,sub_band=None,pol_deg=2,min_ampl=1.,init_wid=0,
         sele[-init_wid:]=False
         isum=sum(sele)
         if isum==0:
-            print 'no frequency cleaned'
+            print('no frequency cleaned')
             return ae
         if enlarg>0:
             sele=convolve(sele,ones(2*enlarg+1),'same')>0
-            print 'cleaning %i (prev %i) tim. bins'%(sum(sele),isum)
+            print('cleaning %i (prev %i) tim. bins'%(sum(sele),isum))
         foure[sele]=0j
     if rep!=None:
         return rep
@@ -269,7 +271,7 @@ def filter(dat,xb=None,min_sig=0,sub_band=None,pol_deg=2,min_ampl=1.,init_wid=0,
 
 def basel(lst,rep,bas,lim,ord=1,fit=None):
     '''baseline subtraction below peaks
-    currently lorentzian/gaussian fit to peaks available
+    currectly lorentzian/gaussian fit to peaks available
     lst: list of names
     rep: repository
     bas: x-axis baseline
@@ -287,7 +289,7 @@ def basel(lst,rep,bas,lim,ord=1,fit=None):
         elif fit[:3]=="lor":fun=lambda par:par[0]/(((bin-par[1])*par[2])**2+1)+par[3]-val
         else:fun=lambda par:par[0]*exp(-((bin-par[1])/par[2])**2)+par[3]-val
         par=[1.,bas[(amin+amax)//2],200.,0.]
-    print 'using %i bins (%i:%i = %.2g:%.2g)'%(len(bin),amin,amax,bin[0],bin[-1])
+    print('using %i bins (%i:%i = %.2g:%.2g)'%(len(bin),amin,amax,bin[0],bin[-1]))
     qep=[]
     for s in lst:
         if s not in rep: continue
@@ -296,13 +298,13 @@ def basel(lst,rep,bas,lim,ord=1,fit=None):
         flus=val.std()*2.
         #ids=arange(len(val))[abs(val)<flus]
         idx2=polyfit(bin[abs(val)<flus],val[abs(val)<flus],ord)
-        print '%s: using %i bins for bkg'%(s,sum(abs(val)<flus))
+        print('%s: using %i bins for bkg'%(s,sum(abs(val)<flus)))
         val-=polyval(idx2,bin)
         if fit!=None:
             pos=val.argmax()
             if -val.min()>val[pos]: 
                 pos=val.argmin()
-                print s+':absorption'
+                print(s+':absorption')
             par[0]=val[pos]
             par[1]=bin[pos]
             out=leastsq(fun,par,full_output=2)
@@ -342,7 +344,7 @@ def perfind(x,y,cent,wid,nfrq=20,nphas=20,max_null_frac=0):
         if max_null_frac>0:
             frac_null=sum(phg<=0.)/float(nphas)
             if frac_null>max_null_frac:
-                print 'frq %.2f makes %.0f%% empty bins: possible aliasing'%(frq,frac_null*100)
+                print('frq %.2f makes %.0f%% empty bins: possible aliasing'%(frq,frac_null*100))
                 rep.append([frq,phg[phg>0].mean(),-1])
             else:
                 rep.append([frq,phg.mean(),phg.std()])
@@ -388,19 +390,75 @@ def beats(b,bin=20,rep=0,mev=10,lim=0.7):
     if rep==3: return zip(pos*bin,bdif[pos])
     if rep==2: return zip(pos*bin,dsel[dsel>int(0.7*mev)])
     return pos*bin #positions of beat minima
+
+def ext_ran_fit(pos,x,b,extsel=5,extchi=False,extamp=False,rang=2,alim=None,loud=1):
+    '''should return extrema position ev. amplitude
+    extsel: half-size of analysed region     
+    '''
+    from numpy import polyfit,polyval
+    rep=[] #positions
+    arep=[] #amplitudes
+    crep=[] #fit qual.
+    for i in pos:
+        if extsel==0:
+            if i==0: rep.append([0,0])
+            else: rep.append([i+extsel,i-extsel])
+            continue
+        if i==0: 
+            rep.append(0)
+            arep.append(0)
+            crep.append(0)
+        if i<extsel: continue
+        if i+extsel>len(b): break
+        idx=polyfit(b[i-extsel:i+extsel],x[i-extsel:i+extsel],rang)
+        base=alim>0 and x[i-extsel:i+extsel].min() or x[i-extsel:i+extsel].max()
+        xbary=(abs(x[i-extsel:i+extsel]-base)*b[i-extsel:i+extsel]).sum()/abs(x[i-extsel:i+extsel]-base).sum()
+        if alim: # limit for the highest order coef.
+            if (alim<0 and idx[0]>alim) or (alim>0 and idx[0]<alim):
+                rep.append(xbary)#b[i])
+                if loud>0: print('spectra: problems in polynom fitting around %.4f (curv. %.4f)'%(b[i],idx[0]))
+                if extamp: arep.append(alim>0 and x[i-extsel:i+extsel].max() or x[i-extsel:i+extsel].min())
+                if extchi: crep.append(-1)
+                continue
+        xpos=-idx[1]/2/idx[0]
+        if xpos<b[i-extsel] or xpos>b[i+extsel-1]: 
+            rep.append(xbary)
+            if extamp: arep.append(alim>0 and x[i-extsel:i+extsel].max() or x[i-extsel:i+extsel].min())
+            if loud>0: print('spectra: problems in polynom fitting around %.4f (%.4f)'%(b[i],xpos-b[i]))
+        else: 
+            rep.append(xpos)
+            if extamp: arep.append(idx[2]+xpos*idx[1]/2.)
+        if extchi: crep.append(sum((x[i-extsel:i+extsel]-polyval(idx,b[i-extsel:i+extsel]))**2))
+    if extamp: 
+            if extchi: return rep,arep,crep
+            return rep,arep
+    if extchi: return rep,crep
+    return rep
+
+curv_limit=[0.001,0.001]
+
+def extrema(x,b=None,lbin=0,poly=0,ret_all=False,check_bins=True,msplit=False,retype='nd',
+    polysel=None,extsel=None,ampsel=None,ampmeas=False,loud=1):
+    '''gets points making an "envelope" of a function - maxima/minima of a periodic function
     
-def extrema(x,b=None,lbin=0,poly=0,all=False,loud=1,check=True,msplit=False,retype='nd',polysel=None,extsel=None):
-    '''gets points making an envelope of a function
-    requires quite smooth function - no noise fluctuation
-    polysel - fits polynom only to reduced interval
-    extsel - region around extrema fitted with parabola
+    requires rather smooth function - no noise fluctuation
+        lbin:: rebinning function by bins of [lbin] points
+            check_bins:: using extra.rebin with spline interpolation
+    poly>0::
+        fits a polynom of given order to the evelope
+        ret_all:: not only fitted coefficients, but all points are returned
+        polysel:: fits polynom only to reduced interval
+    poly==0: 
+        returns (minima,maxima)
+    msplit:: split by the middle line
+    extsel:: region around extrema fitted with quadrat. polyn.
     '''
     if b!=None: ob=b.copy()
     if lbin>1: #length of the bin
         nbin=len(x)//lbin
-        if check: #is binning correct
+        if b!=None and check_bins: #is binning correct
             if (b[::lbin].std()>b[::lbin].mean()):
-                print 'binning not uniform: using spline interpolation'
+                print('binning not uniform: using spline interpolation')
                 if b[0]>b[-1]:dir=-1
                 else: dir=1
                 try:
@@ -411,101 +469,133 @@ def extrema(x,b=None,lbin=0,poly=0,all=False,loud=1,check=True,msplit=False,rety
         if nbin>0:
             x=x[:nbin*lbin].reshape(nbin,lbin).mean(1)
             if b!=None:b=b[:nbin*lbin].reshape(nbin,lbin).mean(1)
-            if loud>0: print 'lbinning to %i bins'%len(b)
+            if loud>0: print('lbinning to %i bins'%len(x))
     else: lbin=1
-    dif=x[1:]-x[:-1]
+    if b!=None and b[0]>b[-1]:
+        b=b[::-1]
+        x=x[::-1]
     from numpy import where
-    ale=where(dif[1:]*dif[:-1]<0)[0] 
-    #ale - positions of all extrema
-    shi=0
-    if len(ale)<max(2,poly+1):
-        print 'only %i extrema found in %i bins'%(len(ale),len(x))
+    pmins=where((x[1:-1]<x[2:])*(x[:-2]>x[1:-1]))[0]+1
+    pmaxs=where((x[1:-1]>x[2:])*(x[:-2]<x[1:-1]))[0]+1
+    #dif=x[1:]-x[:-1]
+    #ale=where(dif[1:]*dif[:-1]<0)[0] 
+    #ale - positions of all exetrema
+    if len(pmins)<max(2,poly+1):
+        print('only %i minima found in %i bins'%(len(pmins),len(x)))
         return [],[]
-    if x[ale[0]]>x[ale[1]]: shi=1
-    if loud>1: print 'found %i extrema'%len(ale)
-    from numpy import polyfit,polyval,arange
+    #shi=0
+    #if x[ale[0]]>x[ale[1]]: shi=1
+    if loud>1: print('found %i/%i extrema'%(len(pmins),len(pmaxs)))
+    
+    from numpy import polyfit,polyval,arange,array
     if b==None: b=arange(len(x))
     if msplit: # split by the middle line
-        mline=polyfit(b,x,1) # middle line
-        mcorr=x[ale]-polyval(mline,b[ale])
-        tops=mcorr>0 #maxima
-        bots=mcorr<0 #minima
-        if len(tops)>0:        
-            zz=arange(len(ale))[tops]
-            ww=zz[1:]-zz[:-1]
-            if sum(ww==1)>0: # some multiples
-                if loud>0: print '%i multiple maxima'%sum(ww==1)
-                todel=[]
-                for z in zz[ww==1]:
-                    if b[ale[z]]>b[ale[z+1]]: todel.append(z+1)
-                    else: todel.append(z)
-        if len(bots)>0:
-            zz=arange(len(ale))[bots]
-            ww=zz[1:]-zz[:-1]
-            if sum(ww==1)>0: # some multiples
-                if loud>0: print '%i multiple minima'%sum(ww>2)
-        atops=ale[tops]
-        abots=ale[bots]
-        if msplit=='fine': # in each interval finds minimum or maximum
-            cx=x-polyval(mline,b)
-            pdif=tops.astype(int)[1:]-tops.astype(int)[:-1]
-            ppos=arange(len(ale))[pdif>0]
-            pup=list((ale[ppos+1]+ale[ppos])//2) # going neg -> pos
-            if pup[0]>1: pup.insert(0,0)
-            if pup[-1]<len(x)-1: pup.append(len(x))
-            abots=[cx[pup[i]:pup[i+1]].argmin() for i in range(len(pup)-1)] # not valid if extrema on first/last bin
-            abots=[pup[i]+abots[i] for i in range(len(pup)-1) if abots[i]>0 and abots[i]<(pup[i+1]-pup[i])]
-            atops=[cx[pup[i]:pup[i+1]].argmax() for i in range(len(pup)-1)] # not valid if extrema on first/last bin
-            atops=[pup[i]+atops[i] for i in range(len(pup)-1) if atops[i]>0 and atops[i]<(pup[i+1]-pup[i])]
-        elif msplit=='all': return x-polyval(mline,b)
+        mbin=len(b)//20 # should fit to some smoothed version - or simple mid-points [mbin//2::mbin]
+        mline=polyfit(b[:mbin*20].reshape(20,mbin).mean(1),x[:mbin*20].reshape(20,mbin).mean(1),1) # middle line
+        tops=x[pmaxs]>polyval(mline,b[pmaxs])
+        bots=x[pmins]<polyval(mline,b[pmins])
+        if loud>1: print('reduced to %i/%i extrema'%(sum(bots),sum(tops)))
+        if msplit=='sort':
+            from numpy import concatenate
+            #ale=concatenate([b[pmaxs][tops],b[pmins][bots]])
+            ale=concatenate([pmaxs[tops],pmins[bots]])
+            isep=sum(tops)
+            sale=ale.argsort() # how do maxima and minima mix
+            pale=arange(len(ale))[sale<isep]
+            sep=(pale[1:]-pale[:-1])>1 # where are maxima separated
+            tep=[0]+list(arange(len(sep))[sep]+1)+[len(sep)+1]
+            if loud>2: print('checking %i intervals'%len(tep))
+            vals=x[pmaxs][tops]
+            lpos=arange(len(tops))[tops]
+            for i in range(len(tep)-1): 
+                if tep[i+1]-tep[i]>1:
+                    mpos=vals[tep[i]:tep[i+1]].argmax()
+                    spos=list(lpos[tep[i]:tep[i+1]])
+                    del spos[mpos]
+                    tops[spos]=False # unmarking all other maxima
+                    
+            pale2=arange(len(ale))[sale>=isep]
+            sep=(pale2[1:]-pale2[:-1])>1 # where are minima separated
+            tep=[0]+list(arange(len(sep))[sep]+1)+[len(sep)+1]
+            if loud>2: print('checking %i intervals'%len(tep))
+            vals=x[pmins][bots]
+            lpos=arange(len(bots))[bots]
+            for i in range(len(tep)-1): 
+                if tep[i+1]-tep[i]>1:
+                    mpos=vals[tep[i]:tep[i+1]].argmin()
+                    spos=list(lpos[tep[i]:tep[i+1]])
+                    del spos[mpos]
+                    bots[spos]=False # unmarking all other minima
+            #qale=array([1]*sum(tops)+[0]*sum(bots))[sale] #check it
+        atops=pmaxs[tops]
+        abots=pmins[bots]
+        if loud>1: print('finally found %i/%i extrema'%(sum(bots),sum(tops)))
     else:
-        abots=ale[shi::2]+1
-        bots=arange(shi,len(ale),2)
-        atops=ale[(shi+1)%2::2]+1
-        tops=arange((shi+1)%2,len(ale),2)
-    if extsel!=None:
-        if extsel<0:
-            extsel=-extsel
-            extchi=True
-            ctops,cbots=[],[]
-        else: extchi=False
-        btops=[]
-        for i in atops:
-            if extsel==0:btops.append([i+extsel,i-extsel])
+        abots,atops=pmins,pmaxs
+    if ampsel:
+        ybots,ytops=[],[]
+        sh=0 #shift
+        if abots[0]<atops[0]: 
+            sh=1
+            ybots.append(x[atops[0]]-x[abots[0]])
+        dh=len(atops)-len(abots)+sh
+        for i in range(len(atops)-dh):
+            d1=x[atops[i]]-x[abots[i+sh]]
+            if sh==0 and i==0:
+                ytops.append(d1)
             else:
-                if i<extsel: continue
-                if i+extsel>len(b): break
-                idx=polyfit(b[i-extsel:i+extsel],x[i-extsel:i+extsel],2)
-                btops.append(-idx[1]/2/idx[0])
-                if extchi: ctops.append(sum((x[i-extsel:i+extsel]-polyval(idx,b[i-extsel:i+extsel]))**2))
-        bbots=[]
-        for i in abots:
-            if extsel==0:bbots.append([i+extsel,i-extsel])
-            else:
-                if i<extsel: continue
-                if i+extsel>len(b): break
-                idx=polyfit(b[i-extsel:i+extsel],x[i-extsel:i+extsel],2)
-                bbots.append(-idx[1]/2/idx[0])
-                if extchi: cbots.append(sum((x[i-extsel:i+extsel]-polyval(idx,b[i-extsel:i+extsel]))**2))
-        if extchi: return bbots,btops,cbots,ctops
-        return bbots,btops
+                d2=x[atops[i]]-x[abots[i+sh-1]]
+                ytops.append((d1+d2)/2.)
+        if dh>0: 
+            i=len(atops)-1
+            ytops.append(x[atops[i]]-x[abots[i+sh-1]])
+        for i in range(len(abots)-sh-1+dh):# min(len(abots),len(atops))-1):
+            d1=x[atops[i]]-x[abots[i+sh]]
+            d2=x[atops[i+1]]-x[abots[i+sh]]
+            ybots.append((d1+d2)/2.)
+        if dh==0:
+            i=len(abots)-sh-1
+            ybots.append(x[atops[i]]-x[abots[i+sh]])
+        ytops=array(ytops)/max(ytops)
+        ybots=array(ybots)/max(ybots)
+        atops[ytops<ampsel]=0
+        abots[ybots<ampsel]=0
+        if loud>1: print('%i/%i extrema too weak'%(sum(abots==0),sum(atops==0)))
     if poly<0: return abots,atops
+    if extsel!=None:
+        if extsel<0: # reporting quality of the fit
+            btops,mtops,ctops=ext_ran_fit(atops,x,b,-extsel,True,True,loud=loud)
+            bbots,mbots,cbots=ext_ran_fit(abots,x,b,-extsel,True,True,loud=loud)
+            if ampmeas: return bbots,btops,mbots,mtops,cbots,ctops
+            return bbots,btops,cbots,ctops
+        else: 
+            btops,mtops=ext_ran_fit(atops,x,b,extsel,True,False,alim=-curv_limit[0],loud=loud)
+            bbots,mbots=ext_ran_fit(abots,x,b,extsel,True,False,alim=curv_limit[1],loud=loud)            
+            if ampmeas: return bbots,btops,mbots,mtops
+            return bbots,btops
     if poly>0: # making polynomial fit
         if polysel:
             abots=abots[polysel[0]:polysel[1]]
             atops=atops[polysel[0]:polysel[1]]
+        atops=atops[atops>0]
+        abots=abots[abots>0]
         if len(abots)<poly or len(atops)<poly:
-            print 'too few points, cannot fit'
+            print('too few points, cannot fit')
             return b[abots],b[atops]
         p1=polyfit(b[atops],x[atops],poly)
         p2=polyfit(b[abots],x[abots],poly)
-        if all: return (p2+p1)/2.,(p1-p2)/2.,b[abots],b[atops]
+        if ret_all: return (p2+p1)/2.,(p1-p2)/2.,b[abots],b[atops]
         else: return (p2+p1)/2.,(p1-p2)/2.
     return b[abots],b[atops]
     
-global sin_fin,par_con
+global sin_fin,par_con,sin_inv_wei
 sin_fin=None
 par_con=[]
+
+si_cau_mod=[ 0.0782, 0.0101] # term x^2 x^4 [ 0.03460822,  0.26845202,  3.43098771 ]
+
+sin_inv_wei=8.5#for MIR data
+sin_inv_wei=1.6#for simulated data
 
 def sin_com(p,x,y=None,np=None,nord=2,inv=False):
     '''universal function for fitting periodic signals
@@ -514,23 +604,28 @@ def sin_com(p,x,y=None,np=None,nord=2,inv=False):
     int=='else': 1/(3+sin(ph+[2]))
     '''
     from numpy import sin,arctan,polyval
-    a=polyval(p[:nord+1],x)
-    if np!=None: ph=x*(1+np[0]*x**2+np[1]*x**4)/p[nord+1]
+    #q=p[:nord+1].copy()
+    p[0]*=-p[0] #simple constraint, quadratic parameter should be negative
+    a=polyval(p[:nord+1],x) #amplitude of periodic func.
+    if (np!=None) and (len(np)>1): ph=x*(1+np[0]*x**2+np[1]*x**4)/p[nord+1]
     else: ph=x/p[nord+1]
-    #ph+=p[nord+2]
-    #print 'ph %.2f -%.2f'%(ph.min(),ph.max())
     if inv=='frac':
         f=a*(sin(2*pi*(ph+p[nord+2]))+p[nord+5])
         f/=arctan(p[nord+4])/pi*2*sin(2*pi*(ph*p[nord+1]/np[2]+p[nord+2]+p[nord+3]))+1.1 
         # alternatively - using only positive values [0-1] (1-exp(-p[nord+4]))*0.9
         
-    elif inv: f=a*(3-8/(3+sin(2*pi*(ph+p[nord+2]))))
+    elif inv: 
+        if (type(inv)==int) or (type(inv)==float): f=a*(inv-(inv+1)*(inv-1)/(inv+sin(2*pi*(ph+p[nord+2]))))
+        else: f=a*(2-3/(2+sin(2*pi*(ph+p[nord+2]))))
     else: f=a*sin(2*pi*(ph+p[nord+2]))
-    f+=polyval(p[-nord-1:],x)
+    f+=polyval(p[-nord-1:],x) #baseline profile
     if y!=None: f-=y
     return f
-    
-def fitting(x,y,p0=None,prange=None,bounds=None,loud=1,fit_mode=-1,refr_mode=None,lbin=0,nprof=None,nord=2):
+
+global last_pars
+last_pars=None
+
+def fitting(x,y,p0=None,prange=None,bounds=None,loud=1,fit_mode=1,refr_mode=None,lbin=0,nprof=None,nord=2):
     '''periodic part fitted with slightly slanted sinusoid
     prange : range of periods to use..
     // added possible polynomial dependence of refraction index (oscilation frequency) on wavelength
@@ -539,56 +634,68 @@ def fitting(x,y,p0=None,prange=None,bounds=None,loud=1,fit_mode=-1,refr_mode=Non
     nprof: profile of index of refraction [parameters of Cauchy]
     returns parameters (ampl.polynom + period + phase-shift + bckg. polynom [+ 2-par Cauchy profile]) and chi2
     '''
-    global sin_fin,par_con
+    global sin_fin,par_con,last_pars
     if fit_mode<0: fit_mode=glob_fit_mode
-    from numpy import polyval,array,sign
+    from numpy import polyval,array,sign,ndarray,iterable
     if (sin_fin==None) or nprof:
         if refr_mode=='poly':
-            if nprof!=None: 
+            if iterable(nprof)>0:#type(nprof)==list or type(nprof)==array or type(nprof)==ndarray: 
                 sin_fin=lambda p,x,y:sin_com(p,x,y,np=nprof,nord=nord)
                 #sin_fin=lambda p,x,y:((p[0]*x*x+p[1]*x+p[2])*sin(2*pi*(x/p[3]*(1+nprof[0]*x**2+nprof[1]*x**4)+p[4]))+p[5]*x*x+p[6]*x+p[7]-y)
-                if loud>2: print 'defined 7par function'
+                if loud>2: print('defined 7par function')
             else:
-                sin_fin=lambda p,x,y:sin_com(p[:4+2*nord],x,y,np=p[4+2*nord:],nord=nord)+(1-sign(p[0]))*5.
-                if type(bounds)==list and len(bounds)==0:
-	          for i in range(len(bounds),4+2*nord):
-        	      bounds.append(None)
-                  bounds.append([0,1000.])
-              	  bounds.append([0,1000.])
-                #sin_fin=lambda p,x,y:((p[0]*x*x+p[1]*x+p[2])*sin(2*pi*(x/p[3]*(1+p[8]*x**2+p[9]*x**4)+p[4]))+p[5]*x*x+p[6]*x+p[7]-y)
+                sin_fin=lambda p,x,y:sin_com(p[:4+2*nord],x,y,np=p[4+2*nord:],nord=nord)#+(1-sign(p[0]))*5.
+            if type(bounds)==list and len(bounds)==0:
+                for i in range(len(bounds),4+2*nord):
+                    bounds.append(None)
+                    bounds.append([0,1000.])
+                    bounds.append([0,1000.])
+            #sin_fin=lambda p,x,y:((p[0]*x*x+p[1]*x+p[2])*sin(2*pi*(x/p[3]*(1+p[8]*x**2+p[9]*x**4)+p[4]))+p[5]*x*x+p[6]*x+p[7]-y)
         elif refr_mode=='frac': sin_fin=lambda p,x,y:sin_com(p,x,y,nord=nord,np=nprof,inv='frac')
-        elif refr_mode=='inve': sin_fin=lambda p,x,y:sin_com(p,x,y,nord=nord,inv=True)
+        elif refr_mode=='inve': 
+            if iterable(nprof)>0: 
+                sin_fin=lambda p,x,y:sin_com(p[:4+2*nord],x,y,nord=nord,inv=sin_inv_wei,np=nprof)
+            else: 
+                if nprof!=None: sin_fin=lambda p,x,y:sin_com(p[:4+2*nord],x,y,nord=nord,inv=nprof,np=p[4+2*nord:])
+                else: sin_fin=lambda p,x,y:sin_com(p[:4+2*nord],x,y,nord=nord,inv=sin_inv_wei,np=p[4+2*nord:])
         else: 
-	    sin_fin=lambda p,x,y:sin_com(p,x,y,nord=nord)+(1-sign(p[0]))*5.
-	    if bounds==None: bounds=[[0,1e6]] 
+            sin_fin=lambda p,x,y:sin_com(p,x,y,nord=nord)#+(1-sign(p[0]))*5.
+        #if bounds==None: bounds=[[0,1e6]] 
             #if nord==3: sin_fin=lambda p,x,y:((p[0]*x*x*x+p[1]*x*x+p[2]*x+p[3])*sin(2*pi*(x/p[4]+p[5]))+p[6]*x*x*x+p[7]*x*x+p[8]*x+p[9]-y)
             #elif nord==2: sin_fin=lambda p,x,y:((p[0]*x*x+p[1]*x+p[2])*sin(2*pi*(x/p[3]+p[4]))+p[5]*x*x+p[6]*x+p[7]-y)
             #else: sin_fin=lambda p,x,y:((p[0]*x+p[1])*sin(2*pi*(x/p[2]+p[3]))+p[4]*x+p[5]-y)
     if p0==[]: return
-    if p0==None:
+    if p0=='last': p0=last_pars
+    elif p0==None:
         if lbin<0 and len(x)>200: lbin=20
         try:
-            am,ad,ip,iq=extrema(y,x,poly=nord,all=True,loud=2,lbin=lbin,check='full',msplit='fine')
+            am,ad,ip,iq=extrema(y,x,poly=nord,all=True,loud=2,lbin=lbin,check_bins='full',msplit='sort')
         except:
             return [array([0.]*(nord+6)),10000]
-        p0=list(am)+[0,0] #period + phase
-        if refr_mode=='frac':p0+=[0,0.5,1.] #phase and relat. intensity (<1.) of nominator
+        phas=0
+        if am[0]>0: 
+            am=-am
+            phas+=0.5
+        from math import sqrt
+        am[0]=-sqrt(-am[0])
+        p0=list(am)+[0,phas] #period + phase
+        if refr_mode=='frac':p0+=[0,phas+0.5,1.] #phase and relat. intensity (<1.) of nominator
         p0+=list(ad)
         if refr_mode=='poly':p0+=[0,0]
         if loud>0:
-            print 'mean value %f, mean amplitude %f'%(polyval(am,x).mean(),polyval(ad,x).mean())
+            print('mean value %f, mean amplitude %f'%(polyval(am,x).mean(),polyval(ad,x).mean()))
         dp=(ip[1:]-ip[:-1]).mean()
         dq=(iq[1:]-iq[:-1]).mean()
         if abs(dp-dq)>(iq[1:]-iq[:-1]).std():
-            print 'unstable period %f vs %f'%(dp,dq)
-        else: print 'estimated period %f'%((dp+dq)/2)
+            print('unstable period %f vs %f'%(dp,dq))
+        else: print('estimated period %f'%((dp+dq)/2))
         ppos=nord+1 # which parameter is period?
         p0[ppos]=(dp+dq)/2
         if prange!=None:
             if abs(p0[ppos])<prange[0]:p0[ppos]=prange[0]
             elif abs(p0[ppos])>prange[1]:p0[ppos]=prange[1]
             else: p0[ppos]=abs(p0[ppos])
-        if loud>2: print 'init pars: %s'%p0
+        if loud>2: print('init pars: %s'%p0)
         #p0[4]=iq[0]/dq-.25)
     chi2=lambda p,x,y:(sin_fin(p,x,y)**2).sum()
     if bounds: # constrained fit
@@ -599,7 +706,7 @@ def fitting(x,y,p0=None,prange=None,bounds=None,loud=1,fit_mode=-1,refr_mode=Non
                 if bounds[i]!=None:
                     par_con.append(lambda p,a,b:(p[i]-bounds[i][0])*(bounds[i][1]-p[i]))
         else:
-            print 'dont know how to interpret bounds "%s"'%str(bounds)
+            print('dont know how to interpret bounds "%s"'%str(bounds))
     else:
         fun=chi2
         if fit_mode==1: from scipy.optimize import fmin_bfgs as fmin
@@ -608,12 +715,12 @@ def fitting(x,y,p0=None,prange=None,bounds=None,loud=1,fit_mode=-1,refr_mode=Non
             from scipy.optimize import leastsq as fmin
             fun=sin_fin
     if bounds: 
-        print 'constrained call with 2 bounds'
-        zoo=fmin(sin_fin,p0,par_con,args=(x,y),consargs=None)
-    elif fit_mode: zoo=fmin(fun,p0,extra_der,args=(x,y),disp=loud)
-    else: zoo,ok=fmin(fun,p0,args=(x,y))
+        print('constrained call with 2 bounds')
+        last_pars=fmin(sin_fin,p0,par_con,args=(x,y),consargs=None)
+    elif fit_mode>0: last_pars=fmin(fun,p0,extra_der,args=(x,y),disp=loud)
+    else: last_pars,ok=fmin(fun,p0,args=(x,y))
     #if ok!=1: return zoo
-    return zoo,chi2(zoo,x,y)
+    return last_pars,chi2(last_pars,x,y)
 
 def extra_fun(y,per,exten=0,p=None):
     '''some more complicated functions describing periodic spectrum/signal
@@ -699,19 +806,19 @@ def period(x,y,per=0,lbin=20,nbin=20,npha=10,corr=True):
     if per==0:
         rep=filter(y,x,min_ampl=0,rep=[])
         if len(rep)==0: 
-            print 'cannot pre-determine period - exiting'
+            print('cannot pre-determine period - exiting')
             return
         else:
             if len(rep)>1:
-                print '%i periods found (%s)'%(len(rep),rep)
+                print('%i periods found (%s)'%(len(rep),rep))
             per=abs(rep[0])
     else: par[1]=per
     if len(x)<lbin*nbin:
         nbin=len(x)//lbin
-        print 'reducing to %i bins'%(nbin)
+        print('reducing to %i bins'%(nbin))
     if len(x)<lbin*nbin:
         nbin=len(x)//lbin
-        print 'reducing to %i bins'%(nbin)
+        print('reducing to %i bins'%(nbin))
     pos=x[:lbin*nbin].reshape(lbin,nbin).mean(1)
     pom=y[:lbin*nbin].reshape(lbin,nbin).mean(1)
     a,b=polyfit(pos,pom,1)
@@ -722,7 +829,7 @@ def period(x,y,per=0,lbin=20,nbin=20,npha=10,corr=True):
     par[0]=a*1.4
     par[3]=b
     out=leastsq(fun,par)
-    print 'found period %.3f, phase %.3f'%(1./out[0][1],out[0][2])
+    print('found period %.3f, phase %.3f'%(1./out[0][1],out[0][2]))
     if npha==0: return 1./out[0][1],out[0][2]
     pha=x*out[0][1]-out[0][2]
     pia=((pha-pha.astype(int))*npha).astype(int)
@@ -750,22 +857,22 @@ def crossnorm(bas1,dat1,bas2,dat2,prec=0.1,bkg1=None,bkg2=None,rat_frac=0.2,con_
         bas1,dat1,bas2,dat2=bas2,dat2,bas1,dat1
         lim2=sum(bas2>bas1[-1])
         if lim2==0:
-            print 'no overlap'
+            print('no overlap')
             return
     lim1=sum(bas2[0]>bas1)
-    print 'using %i vs. %i bins'%(lim1,lim2)
+    print('using %i vs. %i bins'%(lim1,lim2))
     if lim2<lim1:
         alim=arange(lim1)
         idis=[alim[abs(bas1[-lim1:]-bas2[i])<prec] for i in range(lim2)]
         idis=array([len(a)>0 and a[0] or -1 for a in idis])
-        if loud>0: print 'matching %i indices of %i'%(sum(idis>=0),len(idis))
+        if loud>0: print('matching %i indices of %i'%(sum(idis>=0),len(idis)))
         #idis=array(idis)[:,0]
         if con_siz>0:
             n=int(lim1/lim2)+con_siz
             oof=hamming(n+2)[1:n+1]
             oof/=sum(oof)
             dat0=convolve(dat1[-lim1:],oof,'same')
-            if loud>1: print 'mean value in 1. set:from %.3f to %.3f'%(dat1[-lim1:].mean(),dat0.mean())
+            if loud>1: print('mean value in 1. set:from %.3f to %.3f'%(dat1[-lim1:].mean(),dat0.mean()))
         else:
             dat0=dat1[-lim1:]
         dat0=dat0[idis][1:-1]
@@ -773,7 +880,7 @@ def crossnorm(bas1,dat1,bas2,dat2,prec=0.1,bkg1=None,bkg2=None,rat_frac=0.2,con_
         if bkg1!=None: bkg1=bkg1[idis][1:-1]
         if bkg2!=None: bkg2=bkg2[1:lim2-1]
     elif lim2>lim1:
-        print 'please put finer sampled data first'
+        print('please put finer sampled data first')
         return
     else:
         dat0=dat1[-lim1:]
@@ -791,17 +898,17 @@ def crossnorm(bas1,dat1,bas2,dat2,prec=0.1,bkg1=None,bkg2=None,rat_frac=0.2,con_
         ls=sum(sele)
     else:
         ls=0
-    if loud>0: print 'fitting %i vs %i bins'%(len(dat0),len(dat3))
+    if loud>0: print('fitting %i vs %i bins'%(len(dat0),len(dat3)))
     if ord>0:
         idx=polyfit(dat0,dat3,ord)
-        print 'overlay %i bins (%i):dat2=%.3f + dat1*(%.3f)'%(lim2-2,ls,idx[1],idx[0])
+        print('overlay %i bins (%i):dat2=%.3f + dat1*(%.3f)'%(lim2-2,ls,idx[1],idx[0]))
         return (dat2-idx[1])/idx[0]
     if ord<0:
         rat=(dat3/dat0).mean()
-        print 'ratio %.3f'%rat
+        print('ratio %.3f'%rat)
         return dat2/rat
     dif=(dat3-dat0).mean()
-    print 'diff %.3f'%dif
+    print('diff %.3f'%dif)
     return dat2-dif
 
 global bord
@@ -814,21 +921,21 @@ def crossfit(lims,bas1,dat1,bas2,dat2,bkg1=None,bkg2=None,rat_frac=0.2,ord=1,lou
     sele1=(bas1>lims[0])&(bas1<lims[1])
     if bkg1!=None: sele1&=(bkg1>(median(bkg1)*rat_frac))[:len(sele1)]
     if sum(sele1)==0:
-        print 'no bins matching for set1 [%.1f - %.1f]'%tuple(lims[:2])
+        print('no bins matching for set1 [%.1f - %.1f]'%tuple(lims[:2]))
         return
     idx1=polyfit(bas1[sele1],dat1[sele1],ord)
     chi1=sum((dat1[sele1]-polyval(idx1,bas1[sele1]))**2)/sum(dat1[sele1]**2)
-    if loud>0: print "fitting %i bins [chi %.3g]: %s"%(sum(sele1),chi1,idx1)
+    if loud>0: print("fitting %i bins [chi %.3g]: %s"%(sum(sele1),chi1,idx1))
     if len(lims)>2: lims2=lims[2:]
     else: lims2=lims
     sele2=(bas2>lims2[0])&(bas2<lims2[1])
     if bkg2!=None: sele2&=(bkg2>(median(bkg2)*rat_frac))[:len(sele2)]
     if sum(sele2)==0:
-        print 'no bins matching for set2 [%.1f - %.1f]'%tuple(lims2)
+        print('no bins matching for set2 [%.1f - %.1f]'%tuple(lims2))
         return
     idx2=polyfit(bas2[sele2],dat2[sele2],ord)
     chi2=sum((dat2[sele2]-polyval(idx2,bas2[sele2]))**2)/sum(dat2[sele2]**2)
-    if loud>0: print "fitting %i bins [chi %.3g]: %s"%(sum(sele2),chi2,idx2)
+    if loud>0: print("fitting %i bins [chi %.3g]: %s"%(sum(sele2),chi2,idx2))
     if rep==0: return idx1,idx2
     if step>0:
         x=arange(lims[cross[0]],lims[cross[1]],step)
@@ -864,7 +971,7 @@ def unittest(nsamp=100,size=10.,freq=[8],rep=0,loud=0,relamp=0.2):
     for f in freq:
         if f<0: do2+=relamp*(log(sin(-2*pi*f*aw2)+2)-log(3.)/2) # logsinus
         else: do2+=relamp*sin(2*pi*f*aw2)
-    if loud>0: print 'mean %.4f before, %.4f after'%(do.mean(), do2.mean())
+    if loud>0: print('mean %.4f before, %.4f after'%(do.mean(), do2.mean()))
     if rep==1: return do2
     redo=filter(do2,aw2,min_wid=0,min_ampl=0)
     return redo

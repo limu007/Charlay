@@ -11,8 +11,10 @@ from matplotlib.figure import Figure
 from matplotlib.widgets import SpanSelector 
 
 from numpy import arange
-#from . 
-import labrc as rc
+try:
+    from scanner import labrc as rc
+except:
+    from . import labrc as rc
 
 fluid_lims=False #can change vertical limits interactively?
 
@@ -46,9 +48,9 @@ class MyMplCanvas(FigureCanvas):
         self.axes.hold(False)
         self.compute_initial_figure()
         FigureCanvas.__init__(self, fig)
-        if True:
+        if False:
         #try:
-            self.setParent(parent)
+            #self.setParent(parent)
             #FigureCanvas.setSizePolicy(self,
             #        QtGui.QSizePolicy.Expanding,
             #        QtGui.QSizePolicy.Expanding)

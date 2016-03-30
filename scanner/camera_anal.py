@@ -28,31 +28,34 @@ def find_three(z2,z3):
                     alp.append(rep)
     return array(alp)
 
-def get_edge(m,lev=1000,step=32,rep=1,bkg=[0,40],ndsp=5):
-	'''predpoklada fasetu vpravo/vlevo
-	volny okraj vpravo/vlevo (urcen parametrem bkg) pro urceni pozadi
-	'''
-	from numpy import where,median
-	if lev==0:
-		lev=median(m[:,bkg[0]:bkg[1]])
-		dsp=median(abs((m[:,bkg[0]:bkg[1]]-lev).ravel()))
-		lev+=ndsp*dsp
-	else:
-		dsp=median(abs((m[:,bkg[0]:bkg[1]]-lev).ravel()))
-	md=m>lev
-	prof=md.sum(1)
-	edg_pos = lambda l:where(abs(l[1:]-l[:-1]))[0][[0,-1]]
-	
-	npcs=prof.shape[0]/step
-	pos=where(prof[:npcs*step].reshape(npcs,step).min(1)>md.shape[1]/2)[0]*step
-	if rep==2: return pos
-	#pos=range(100,500,50)
-	if rep==3: return [(median(m[i-step/2+1:i+step/2-1,bkg[0]:bkg[1]])+ndsp*dsp) for i in pos]
-	pts=[edg_pos(m[i]>(median(m[i,bkg[0]:bkg[1]])+ndsp*dsp)) for i in pos]
-	y=r_[pos,pos].reshape(2,len(pos)).transpose()
-	z=r_[[pts,y]].swapaxes(0,2)
-	#plot(z[0][:,0],z[0][:,1],'o')
-	return z
+def get_edge(m,lev=1000,step=32,rep=1,bkg=[0,40],ndsp=5,min_frac=2):
+    '''predpoklada fasetu vpravo/vlevo
+    volny okraj vpravo/vlevo (urcen parametrem bkg) pro urceni pozadi
+    '''
+    from numpy import where,median
+    if lev==0:
+        lev=median(m[:,bkg[0]:bkg[1]])
+        dsp=median(abs((m[:,bkg[0]:bkg[1]]-lev).ravel()))
+        lev+=ndsp*dsp
+    else:
+        dsp=median(abs((m[:,bkg[0]:bkg[1]]-lev).ravel()))
+    md=m>lev
+    prof=md.sum(1)
+    edg_pos = lambda l:where(abs(l[1:]-l[:-1]))[0]#[[0,-1]]
+    
+    npcs=prof.shape[0]//step
+    #print(npcs,step,prof[:npcs*step].shape)
+    pos=where(prof[:npcs*step].reshape(npcs,step).min(1)>md.shape[1]/min_frac)[0]*step
+    if rep==2: return pos
+    #pos=range(100,500,50)
+    if rep==3: return [(median(m[i-step/2+1:i+step/2-1,bkg[0]:bkg[1]])+ndsp*dsp) for i in pos]
+    pts=[edg_pos(m[i]>(median(m[i,bkg[0]:bkg[1]])+ndsp*dsp)) for i in pos]
+    pts=[p[[0,-1]] if len(p)>0 else [0,0] for p in pts]
+    y=r_[pos,pos].reshape(2,len(pos)).transpose()
+    z=r_[[pts,y]].swapaxes(0,2)
+    z=[array([p for p in q if p[0]>0]) for q in z]
+    #plot(z[0][:,0],z[0][:,1],'o')
+    return z
 
 
 def find_centre(z):
@@ -82,6 +85,32 @@ def find_fasete(z,cz,rep=1,toler=5):
 	from math import atan,pi
 	return 90-atan(alp)*180/pi
 
+def get_centre_sloped(im1a,mlev=1000,doplot=False,radint=[240,280],raditer=3):
+    from matplotlib.pyplot import plot
+    z0=get_edge(im1a,lev=mlev,step=32)
+    im2a=im1a[::-1].transpose()
+    z1=get_edge(im2a,lev=mlev,step=32)[::-1]
+    if doplot: 
+        plot(z0[0][:,0],z0[0][:,1],'*')
+        plot(z0[1][:,0],z0[1][:,1],'*')
+    #plot(z3[0][:,1],im2a.shape[1]-z3[0][:,0],'*')
+    z1b=(r_[0,im2a.shape[1]]-z1[0][:,::-1])*r_[-1.,1]
+    if doplot: plot(z1b[:,0],z1b[:,1],'*')
+    alp=find_three(z0*fcor,z1b*fcor)
+
+    rsel=(alp[:,2]>radint[0])*(alp[:,2]<radint[1])
+    cen2,ercen2=alp[rsel].mean(0),alp[rsel].std(0)
+    for i in range(2):
+        #m,s=alp2[rsel2,i].mean()
+        rsel*=(alp[:,i]>cen2[i]-3*ercen2[i])*(alp[:,i]<cen2[i]+3*ercen2[i])
+    cr,er=cen2[2],ercen2[2]
+    for i in range(raditer):
+        #m,s=alp2[rsel2,i].mean()
+        rsel*=(alp[:,2]>cr-(3-i*0.5)*er)*(alp[:,2]<cr+(3-i*0.5)*er)
+        cr,er=alp[rsel,2].mean(0),alp[rsel,2].std(0)
+    cen2,ercen2=alp[rsel].mean(0),alp[rsel].std(0)
+    return cen2,ercen2,sum(rsel)
+
 wkeys=['CRPIX1','CRPIX2','CDELT1']
 
 def save_head(wlen=None):
@@ -100,7 +129,7 @@ def refit(z,cz=None,fas=True):
 	if fas:
 		rside=find_fasete(z,cz,rep=2,toler=glob_fase_toler)
 		if len(rside)<3: 
-			print 'only %i pts on right side of circle'%len(rside)
+			print('only %i pts on right side of circle'%len(rside))
 			if len(rside)==0: return [],[],0
 	else:
 		rside=z[1]
@@ -124,6 +153,28 @@ def get_scale(dd,cent,bord=0):
 	sh=(cent[1]-cent[0]+0.5).astype(int)
 	sz=r_[[d.shape for d in dd]] #image size
 
+def make_flat(im1a,flat,cent,rad,spl=1.1):
+    from numpy import indices,zeros
+    ix,iy=indices(im1a.shape)
+    dis2=(ix-cent[0])**2*spl**2+(iy-cent[1])**2
+    psel=dis2<rad**2
+    im3a=zeros(im1a.shape)
+    im3a[ix[psel],iy[psel]]=im1a[ix[psel],iy[psel]]/flat[ix[psel],iy[psel]].astype("f")
+    return im3a
+
+def make_png(a,oname,under=None,over=1.2):
+    imax=a.max()*over
+    if under: 
+            imin=a.min()*under
+            a-=imin
+            imax-=imin
+    na=a.astype("float")/imax*256
+    import PIL
+    img=PIL.Image.new('RGB', a.shape[::-1])
+    for i in range(a.shape[0]):
+      for j in range(a.shape[1]):
+        img.putpixel([j,a.shape[0]-i-1],tuple([int(na[i,j])]*3))
+    img.save(oname)
 
 def merge(inf="Lab/soi/apr14/gan_si_004_02-r1",refine=True,rep=1,msize=1000,rad=300):
 	import pyfits
@@ -153,7 +204,7 @@ def merge(inf="Lab/soi/apr14/gan_si_004_02-r1",refine=True,rep=1,msize=1000,rad=
 			cz=find_centre(z)[0]
 		out[i]=refit(z,cz)[0]	
 		ina[i]=out[i][:2]#out[i][:2]*nsiz/r_[dd[i].shape]
-	print out
+	print(out)
 	if rep==3: return dd,ina
 	#sel=((mgrid[:dd[0].shape[0],:dd[0].shape[1]]-a[:2,newaxis,newaxis])**2).sum(0)>a[2]**2
 	dz=zeros((msize,msize))

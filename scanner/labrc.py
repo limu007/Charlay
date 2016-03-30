@@ -4,7 +4,10 @@ smoothing=0
 mean=20
 intime=25
 use_dyndark=0
-soft_smooth=0
+soft_smooth=9
+instrname='jaz'
+
+debug=0
 
 spec_mode='transmissivity'#'reflectivity'
 spec_unit='eV'
@@ -17,6 +20,7 @@ lang='cs' #language of the interface
 #inst_dir='/home/optik/code/python/scanner/'#installation directory
 #inst_dir='C:\\Python26\\Lib\\site-packages\\scanner\\'
 inst_dir='/home/limu/Code/Monty/scanner/'
+date_dir='/tmp/data'
 auto_adjust_vertical=True # after measurement
 
 #Avantes measure delay in seconds
@@ -79,7 +83,15 @@ ref_tables['Si']='C:\Documents and Settings\Kremik\Dokumenty\Python\period\TblRe
 ref_tables['Si-eps']='C:\Documents and Settings\Kremik\Dokumenty\Python\period\si.dat'
 ref_sample=3 # taking every ref_sample point from tables above
 
-scope_interface='/home/limu/Code/Extra/Charlay/run' #Linux workaround
+#--------------------------------------------------
+ooihome='/opt/OmniDriver/OOI_HOME'
+java_jdk='/usr/local/lib/jdk'
+java_home='/opt/OmniDriver/_jvm'
+java_jvm='/usr/local/lib64/libjvm.so'
+cool_temp=0
+
+#--------------------------------------------------
+scope_interface='/home/limu/Code/Utils/Cython/face/usbtest' #Linux workaround
 linux_write_delay=0.6 #waiting for all data to arrive
 
 eps_ext={'Si':[-2.61678, [[179.4187,5.41916,0.001],[  16.3506,3.17564,0.12138],   [138.945163, 4.60986142,0.001]]]} # dielect. function models
@@ -87,10 +99,13 @@ eps_ext={'Si':[-2.61678, [[179.4187,5.41916,0.001],[  16.3506,3.17564,0.12138], 
 mod_ext={'Si':[0.01401,0,0.0423,0,3.51906]} # Si model by JH : refr. index
 mod_ext['SiO2']=[1.68683e-05,0,1.961953e-03,0,1.4493423] #: 
 
+eps_trans={'Si':"cSi_Asp",'SiO2':"SiO2_gl"}
 # spectral calibration
 spec_pixtable_source=1 # 0-uses stored polynom 1-uses stored pixel position
 dyndark_forget=50 #percentage for dynamic dark
 #--------------------------------------------------
+max_aver_count = 100
+
 scan_extra_buttons=True
 scan_extra_menu_experim=True
 
@@ -124,9 +139,9 @@ output_separ='\t'
 # simulating physical surface
 simu_range=[1.1,2.8]
 simu_mater="InSb"
-simu_mater=["Si","SiO2","Si"]
-simu_layer=[3800,1000]
-simu_layer_fluc=[0.01,0.01]
+#simu_mater=["Si","SiO2","Si"]
+#simu_layer=[3800,1000]
+#simu_layer_fluc=[0.01,0.01]
 simu_calib="Si"
 
 #-------------------------------------------

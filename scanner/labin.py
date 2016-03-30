@@ -12,7 +12,11 @@ gloud=0
 global meas_line #storage for measurements - made global for testing purposes
 meas_line=[]
 
-from scanner import labrc as rc
+try:
+    import labrc as rc
+except:
+    from . import labrc as rc
+    
 def unitconv(ufrom,uto,values):
     from spectra import ev2um
     conv,cinv=1.,0
@@ -104,6 +108,7 @@ class specscope(object):
     dirs=[0,0]
     #global gx,gy
     gx,gy=0,0
+    name=""
 
     def __init__(self,erange=[1.5,4.5],nbin=None):
         '''range in eV'''
@@ -138,8 +143,9 @@ class specscope(object):
         rep=normal(size=self.pixtable.shape,scale=noise)
         mater=None
         if 'mater' in kwargs: mater=kwargs['mater']
-        elif hasattr(self.config,'Material') and self.config.Material!='simu': mater=self.config.Material
+        elif hasattr(self.config,'Material') and self.config.Material.decode('ascii')!='simu': mater=self.config.Material.decode('ascii')
         else: mater=rc.simu_mater
+        #print('using |'+str(mater)+'|')
         if mater!=None:
             if type(mater)==list:
                 for m in mater:
@@ -162,10 +168,13 @@ class specscope(object):
                     self.data[mater]=polyval(rc.mod_ext[mater],self.pixtable)**2
                 else:
                     from spectra import dbload
+                    if type(mater)==bytes: dbname=mater.decode('ascii')
+                    else: dbname=mater
+                    if dbname in rc.eps_trans: dbname=rc.eps_trans[dbname]
                     try:
-                        inp=dbload(mater,self.pixtable)
+                        inp=dbload(dbname,self.pixtable)
                     except:
-                        print('cannot load material '+mater)
+                        print('cannot load material '+dbname)
                         return rep
                     #for i in range(len(inp)):
                     self.data[mater]=inp[1]
@@ -182,7 +191,7 @@ class specscope(object):
         smooth: applies software smoothing
         dark current and reference correction        
         '''
-        from numpy import array
+        from numpy import array,r_
         from time import sleep
         data=None
         iata=None
@@ -198,11 +207,11 @@ class specscope(object):
                 print('measurement failed')
                 return # all attempts failed
         if smooth>0:
-            data=iata[smooth/2-1::-1]+iata+iata[:-smooth/2-1:-1] #reflection on edges
+            data=r_[iata[smooth//2-1::-1],iata,iata[:-smooth//2-1:-1]] #reflection on edges
             from numpy import convolve,hamming
             box=hamming(smooth)
             box/=box.sum()
-            data=convolve(data,box,"same")[smooth/2:-smooth/2]
+            data=convolve(box,data,"same")[smooth//2:-smooth//2]
         if sub_dark and self.dark!=None: data-=self.dark
         if div_flat and self.flat!=None: 
                 data/=self.flat
@@ -374,7 +383,7 @@ class specscope(object):
                 def save(a,b):
                     ouf=open(a+".txt","w")
                     if len(b.shape)>1 and min(b.shape)>1:
-                        ouf.write('#'+'  '.join(["pnt%i"%i for i in range(1,len(b)+1)])+'\n') #writing header
+                        ouf.write("#"+"  ".join(["pnt%i"%i for i in range(1,len(b)+1)])+'\n') #writing header
                     savetxt(ouf,b.transpose(),fmt="%8.5f")
                     ouf.close()
             #rate=newrate
@@ -416,6 +425,8 @@ class specscope(object):
                             control['y']=j
                             control['gx']=self.gx
                             control['gy']=self.gy
+                            if rc.debug==2: print("at pos %i / %i"%(i,j))
+                            elif rc.debug>2: print("at pos %i / %i"%(self.gx,self.gy))
                             if 'meas_evt' in control: control['meas_evt'].set() #starting everything that should come with new measurement
                             if 'queue' in control: control['queue'].put('measured %i %i'%(i,j)) #synchronization for GUI
                             if 'anal_evt' in control: # waiting for analysis to end
@@ -437,10 +448,12 @@ class specscope(object):
                     if j%2==1: 
                         meas_line=meas_line[::-1]
                         #print('line %i inverted'%j)
+                    if self.config.Material.decode('ascii')!='simu':
+                        if radius<=0:
+                            save(oname+"%03i"%(j+1),array(meas_line))
+                        else:
+                            save(oname+"%03i"%(j+ycnt),array(meas_line))
                     if radius<=0:
-                        save(oname+"%03i"%(j+1),array(meas_line))
-                    else:
-                        save(oname+"%03i"%(j+ycnt),array(meas_line))
                         if j>=radius: break
                         if j<-radius: continue
                         self.rate(xdir,xstep*(int(sqrt(radius**2-(j+1)**2))-int(sqrt(radius**2-j**2))))
@@ -460,9 +473,121 @@ class specscope(object):
                     control['x']=xmin
                     control['y']=ymin
                     xstep=-xstep
-            if hasattr(self,'pixtable'): #saving calibration data
+            if hasattr(self,'pixtable') and self.config.Material.decode('ascii')!='simu': #saving calibration data
                 if self.flat==None: save(oname+"calib",self.pixtable)
                 else: save(oname+"calib",array([self.pixtable,self.flat]))
+
+class ocean(specscope):
+    '''developped and tested for JAZ/NIRquest
+    '''
+    hnd=None
+    device=None
+    #dark=None
+    #flat=None
+    #last=None
+    time=None
+    #ddev=None
+    #alldev=None
+    dsize=2048
+    def __init__(self):
+        import os,jpype
+        if rc.java_jdk: #linux?
+            os.environ['OOI_HOME']=rc.ooihome
+            os.environ['JAVA_HOME']=rc.java_home
+            os.environ['JVM_ROOT']=os.environ['JAVA_HOME']
+            os.environ['JDK_INCLUDE_FILE_ROOT']=rc.java_jdk
+            os.environ['LD_LIBRARY_PATH']=os.environ['OOI_HOME']+':'+os.environ['JAVA_HOME']+'/amd64/server'
+    
+        jpype.startJVM(rc.java_jvm,"-Djava.class.path="+os.environ['OOI_HOME']+"/OmniDriver.jar")
+        self.device = jpype.JPackage("com").oceanoptics.omnidriver.api.wrapper.Wrapper();
+        self.device.openAllSpectrometers()
+        self.dsize=self.device.getNumberOfPixels(0)
+        self.name=self.device.getFirmwareModel(0)
+        
+    def setup(self,prange=[1,3000],integ=50,aver=10,calib=None,smooth=None,dyndark=False,unit=0):
+        self.device.setScansToAverage(0, aver)
+        self.device.setIntegrationTime(0, 1000*integ);
+        from numpy import polyval,r_
+        
+        #rep=self.device.AVS_GetNumPixels(self.hnd,pointer(inum))
+        if self.pixtable==None:
+            coef=list(self.device.getCalibrationCoefficientsFromEEProm(0).getWlCoefficients())
+            sdev=polyval(coef[::-1],r_[:self.dsize])
+            self.pixtable=unitconv(1,unit,r_[list(sdev)])
+        if dyndark: self.device.setCorrectForElectricalDark(0,rc.dyndark_forget)
+        if rc.cool_temp<0:
+            twe=self.device.getFeatureControllerThermoElectric(0)
+            twe.setDetectorSetPointCelsius(rc.cool_temp)
+
+    def measure(self):
+        from numpy import array
+        spect = array(self.device.getSpectrum(0))
+        return list(spect[:self.dsize])
+
+    def calibrate(nchan=0,poly=[177.7322,0.380633,-0.00001346845,2.9798580E-9]):
+        c=self.device.CreateCoefficients()
+        c.setWlIntercept(poly[0])
+        c.setWlFirst(poly[1])
+        c.setWlSecond(poly[2])
+        c.setWlThird(poly[3])
+        c.setStrayLight(3.0)
+        self.device.insertKey("Mat429sky") 
+        self.device.setCalibrationCoefficientsIntoEEProm(0,nchan,c,True, True, True)
+    
+    def end(self):
+        import os,jpype,time
+        self.device.closeAllSpectrometers()
+        #time.sleep(2)
+        #del self.device
+        jpype.shutdownJVM()
+
+class oceanjaz(ocean):
+    '''multichannels
+    '''
+    nchan=1
+    chord=[]
+    chrange=[]
+    
+    def setup(self,prange=[1,3000],integ=50,aver=10,calib=None,smooth=None,dyndark=False,unit=0):
+        from numpy import polyval,r_,array,argsort
+        ext=self.device.getWrapperExtensions()
+        self.nchan=ext.getNumberOfEnabledChannels(0)
+        gchan=[]
+        coefbeg=[self.device.getWavelengthIntercept(0,i) for i in range(self.nchan)]
+        self.chrange=[[None,None] for i in range(self.nchan)]
+        self.chord=list(argsort(coefbeg).astype(int))
+        print
+        iprev=None
+        for i in self.chord:
+            coef=array(self.device.getCalibrationCoefficientsFromEEProm(0,int(i)).getWlCoefficients())
+            xchan=list(polyval(coef[::-1],r_[:self.dsize]))
+            print("ch.%i:%.1f-%.1f"%(i,xchan[0],xchan[-1]))
+            if len(gchan)>0:
+                nleft=sum(xchan<gchan[-1])
+                xmid=nleft//2
+                nright=sum(xchan[xmid]<gchan)
+                self.chrange[iprev][1]-=nright
+                gchan=gchan[:-nright]+xchan[xmid:]
+            else:
+                xmid=0
+                gchan=xchan
+
+            self.chrange[i]=[xmid,self.dsize]
+            #print("chan. %i:%.2f-%.2f nm"%(i+1,gchan[-1][0],gchan[-1][-1]))
+            self.device.setIntegrationTime(0, int(i), 1000*integ)
+            self.device.setScansToAverage(0, int(i), aver)
+            if dyndark: self.device.setCorrectForElectricalDark(0,int(i),rc.dyndark_forget)   
+            iprev=i
+        self.pixtable=unitconv(1,unit,array(list(gchan)))
+    
+    def measure(self):
+        data=[]
+        from numpy import array
+        for i in self.chord:
+            #spectrum = array(self.device.getSpectrum(0,i))
+            data+=list(self.device.getSpectrum(0,int(i)))[self.chrange[i][0]:self.chrange[i][1]]
+            #print("chan. %i:max %.2f  mean %.2f"%(i+1,spectrum.max(),spectrum.mean()))
+        return data
 
 class avantes(specscope):
     '''developped and tested for AvaSpec 3648
@@ -629,20 +754,30 @@ class avantes(specscope):
             
 class linuscope(avantes):
     tmpfile="/tmp/data.txt"
-    pixorig=None 
+    logfile="/tmp/usblog.txt"
+    loglen=0
+    loghand=None
+    pixorig=None
+    repeat=1 
 
     def __init__(self,comm="usbdir",loud=0):
         '''communicating through C++ interface on linux
         '''
         import os
-
+        import subprocess as sp
         if hasattr(rc,'scope_pixtable'): pixfile=rc.scope_pixtable
             #default pixel position table (under linux, we don't receive pixel positions)
         else: 
             pixfile=self.tmpfile
         import time
         is_ok=False
-        self.device = os.popen(comm,"w")
+        if self.logfile:
+            if os.path.exists(self.logfile): os.unlink(self.logfile)
+            self.loghand=open(self.logfile,"w")
+        else:
+            self.loghand=sp.PIPE
+        self.process = sp.Popen(comm,stdin=sp.PIPE,stdout=self.loghand,universal_newlines=True)#os.popen(comm,"w")
+        self.device = self.process.stdin
         for j in range(5):
             self.device.write("MEAS %s\n"%self.tmpfile);self.device.flush()
             for i in range(10):
@@ -664,6 +799,8 @@ class linuscope(avantes):
         from spectra import ev2um
         self.pixorig=1000./ev2um/array([float(a[0]) for a in data])
         self.pixtable=self.pixorig
+        self.loghand.flush()
+        self.loglen=len(open(self.logfile).readlines())
 
     def setup(self,prange=[1,1000],integ=100,aver=10,calib=0,smooth=None,dyndark=None,unit=0):
         if self.config==None: self.config=MeasConfigType()
@@ -674,7 +811,8 @@ class linuscope(avantes):
                 #prange=[(p>self.pixorig).sum() for p in prange]
                 from numpy import where
                 print("(got to convert "+str(prange)+")")
-                prange=[where(p<self.pixorig)[0][-1] for p in prange]
+                irange=[where(p<self.pixorig)[0] for p in prange]
+                prange=[(len(p)>0 and p[-1] or 0) for p in irange]
             if prange[0]>prange[1]:prange=prange[::-1]
             if prange[0]>0: prange[0]-=1
             if abs(prange[1]-prange[0])==0: prange=[0,len(self.pixorig)-1]
@@ -702,11 +840,18 @@ class linuscope(avantes):
             self.device.write("SMO %i\n"%smooth);self.device.flush();
         self.config.m_IntegrationTime=int(integ)
         if aver>0: 
+            if rc.max_aver_count and aver>rc.max_aver_count:
+                self.repeat=2*aver//rc.max_aver_count
+                aver=rc.max_aver_count//2 
+                print("repeating %ix"%self.repeat)
+            else:
+                self.repeat=1
             self.config.m_NrAverages=aver
             self.device.write("AVG %i\n"%self.config.m_NrAverages);self.device.flush();
-        if integ>0: 
+        if integ>0:
             self.config.m_IntegrationTime=integ
             self.device.write("EXP %i\n"%integ);self.device.flush();
+            
         return
 
 
@@ -714,21 +859,38 @@ class linuscope(avantes):
         import os,time
         if os.path.exists(self.tmpfile): otime=os.path.getmtime(self.tmpfile)
         else: otime=0
-        self.device.write("MEAS %s\n"%self.tmpfile);self.device.flush()
-        if self.config: time.sleep((self.config.m_IntegrationTime-1)/1000.)
-        for i in range(30):
-            if os.path.exists(self.tmpfile) and otime<os.path.getmtime(self.tmpfile): break
-            time.sleep(0.3)
-        if not os.path.exists(self.tmpfile): return None
-        for i in range(3):
-        	time.sleep(rc.linux_write_delay)
-        	data=[a.strip().split() for a in open(self.tmpfile).readlines() if a[0]!='#'] 
-        	if len(data)==len(self.pixorig): break   
-        self.ddev=[float(a[-1]) for a in data if len(a)==2][self.pixrange[0]:self.pixrange[1]]
+        from numpy import array,zeros
+        if self.pixrange[1]<0: dsum=zeros(len(self.pixtable))
+        else: dsum=zeros(self.pixrange[1]-self.pixrange[0])
+        for i in range(self.repeat):
+            self.device.write("MEAS %s\n"%self.tmpfile);self.device.flush()
+            if self.repeat>1: 
+                if self.parent and hasattr(self.parent,"pbar"): self.parent.pbar.setValue(((i+1)*100)/self.repeat)
+                #print("it %i:"%(i+1),)
+            if self.config: time.sleep((self.config.m_IntegrationTime-1)/1000.)
+            for i in range(30):
+                self.loghand.flush()
+                actlog=open(self.logfile).readlines()
+                if self.loglen<len(actlog):
+                    self.loglen=len(actlog)
+                    if actlog[-1].find('closing')>0 or actlog[-2].find('closing')>0: break
+                #if os.path.exists(self.tmpfile) and otime<os.path.getmtime(self.tmpfile): break
+                time.sleep(0.3)
+                #!!!! need to check the creation time
+            time.sleep(rc.linux_write_delay)
+            if not os.path.exists(self.tmpfile): 
+                print("file %s missing"%self.tmpfile)
+                return None
+            for i in range(3):
+                time.sleep(rc.linux_write_delay)
+                data=[a.strip().split() for a in open(self.tmpfile).readlines() if a[0]!='#'] 
+                if len(data)==len(self.pixorig): break   
+            dsum+=array([float(a[-1]) for a in data if len(a)==2][self.pixrange[0]:self.pixrange[1]])
+            self.ddev=dsum/self.repeat
         return self.ddev
 
     def end(self):
-        self.device.write("END\n");self.device.flush()
+        self.device.write("END\n");#self.device.flush()
         self.device.close()
         
     def check_bord(self,sat_lev=14000):

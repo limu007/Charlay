@@ -5,13 +5,18 @@
 
 global task,anal_data
 from PyQt4 import QtGui, QtCore
-from spectrac import save_dir#,change_sizes
-from canvas import MyStaticMplCanvas,alert
+try:
+    from spectrac import save_dir#,change_sizes
+    from canvas import MyStaticMplCanvas,alert
+    import labrc as rc
+except:
+    from scanner.spectrac import save_dir
+    from scanner.canvas import MyStaticMplCanvas,alert
+    import scanner.labrc as rc
 
 anal_data={}
 from numpy import log
 
-from . import labrc as rc
 from threading import Thread,Event
 
 class ConThread(Thread):
@@ -99,6 +104,7 @@ class ScanDial(QtGui.QDialog):
  
         oname=str(self.outname.text())
         dpos=oname.rfind('.')
+        if rc.debug>0: print('writing '+oname)
         if dpos>0:
             ext=oname[dpos+1:]
             oname=oname[:dpos]
@@ -119,10 +125,12 @@ class ScanDial(QtGui.QDialog):
     def can_start(self):
         self.buttonBox.buttons()[0].setDisabled(0)
     def select_file(self):
-        from .spectrac import save_dir
         self.fileName=self.parent.fileDialog.getSaveFileName(self,self.tr("Saving data"),
             save_dir,self.tr("Text files (*)"))
-        if self.fileName.isEmpty(): return
+        try:
+            if self.fileName=='': return
+        except:
+            if self.fileName.isEmpty(): return
         self.outname.setText(self.fileName)#toAscii()
         import os
         #save_dir=os.path.dirname(str(self.outname.text()))
@@ -165,7 +173,6 @@ class TimeDial(QtGui.QDialog):
     def can_start(self):
         self.buttonBox.buttons()[0].setDisabled(0)
     def select_file(self):
-        from .spectrac import save_dir
         self.fileName=self.parent.fileDialog.getSaveFileName(self,self.tr("Saving data"),
             save_dir,self.tr("Text files (*)"))
         if self.fileName.isEmpty(): return

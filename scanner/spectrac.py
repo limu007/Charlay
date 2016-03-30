@@ -10,7 +10,7 @@ except ImportError:
     QString = str
     QStringList = list
     
-from numpy import arange, sin, pi
+from numpy import arange, array, sin, pi
 global scolor,sstyle,lcolor
 
 sstyle='-,--,-.,:,.'.split(',')
@@ -26,7 +26,14 @@ scmap=dict([('b','blue'),
 ('k','black'),
 ('w','white')])
 
-from scanner import labin # laboratory instruments
+try:
+    from scanner import labin
+    from scanner import labrc as rc
+except:
+    from . import labin
+    from . import labrc as rc
+
+#import labin # laboratory instruments
 
 progname = 'Avantes new cloth'
 progversion = "0.97"
@@ -37,7 +44,6 @@ aw=None
 units=['eV','nm','cm-1']
 uquantity=['energy','wavelength','wavecount']
 
-from scanner import labrc as rc
 global save_dir#,oxide_sel
 save_mode=3
 #save_dir="C:\\Data\\SOI"
@@ -45,9 +51,17 @@ save_dir="/home/limu/Lab"
 use_span='horizontal'
 auto_init=False
 
-from scanner.canvas import MyStaticMplCanvas,MyDynamicMplCanvas,MyNavigationToolbar,GraphWindow,checkItem,SpanSelector
-from scanner.canvas import alert,extend_alert
+try:
+    from canvas import MyStaticMplCanvas,MyDynamicMplCanvas,MyNavigationToolbar,GraphWindow,checkItem,SpanSelector
+    from canvas import alert,extend_alert
+except:
+    from scanner.canvas import MyStaticMplCanvas,MyDynamicMplCanvas,MyNavigationToolbar,GraphWindow,checkItem,SpanSelector
+    from scanner.canvas import alert,extend_alert
 
+try: 
+    import spectrax as sx
+except:
+    from scanner import spectrax as sx
         
 #############################################################################
 
@@ -73,7 +87,7 @@ class ApplicationWindow(GraphWindow):
     report=None
 
     def __init__(self):
-        global lcolor
+        global lcolor,save_dir
 
         if rc.lang=='cs':
                 tran=QtCore.QTranslator()
@@ -82,7 +96,8 @@ class ApplicationWindow(GraphWindow):
                 print('setting language to '+rc.lang)
 
         GraphWindow.__init__(self)
-
+        self.setWindowIconText("PySpec")
+        
         self.smooth=rc.smoothing
         self.mean=rc.mean
         self.intime=rc.intime
@@ -325,11 +340,14 @@ class ApplicationWindow(GraphWindow):
         self.graph.analbar=None
         
         if rc.set_maximized: self.showMaximized()
-
+        if rc.date_dir!=None:
+            from datetime import datetime
+            save_dir=rc.date_dir+os.path.sep+datetime.strftime(datetime.now(),"%Y-%m-%d")
+            print("saving to "+save_dir)
         #from splot import lcolor as scolor
         lcolor=list(scolor)
         lcolor.remove(rc.line_color)
-        if auto_init: self.initSpec()
+        if auto_init: self.initSpec(instrname=None)
         try:
             from queue import Queue
         except:
@@ -401,7 +419,7 @@ class ApplicationWindow(GraphWindow):
         '''
         if mode==None: mode=str(self.referModes.currentText())
         print('setting reference table to %s'%mode)
-        slist=self.stack.values()
+        slist=list(self.stack.values())
         if self.graph.last!=None: slist+=[self.graph.last]
         if not (mode in rc.ref_tables): 
             if self.table!=None:
@@ -535,6 +553,7 @@ class ApplicationWindow(GraphWindow):
     def setSaveFileName(self,name=None,do_save=True):
         global save_dir
         import os
+        if not os.path.exists(save_dir): os.makedirs(save_dir)
         if self.incounter:
             if name==None: name=str(self.saveFileNameLabel.text())
             name,ext=os.path.splitext(name)
@@ -545,8 +564,11 @@ class ApplicationWindow(GraphWindow):
         elif name==None:
             self.fileName = self.fileDialog.getSaveFileName(self,self.tr("Saving data"),
                                              save_dir,self.tr("Matlab Files (*.dat);;Text Files (*.txt);;All Files (*)"))
-            if self.fileName.isEmpty(): return
-            name=str(self.fileName.toAscii())
+            try:
+                if self.fileName=='': return
+            except:
+                if self.fileName.isEmpty(): return
+            name=str(self.fileName)#.toAscii())
         if name:
             text=os.path.basename(name)
             self.saveFileNameLabel.setText(text)
@@ -734,12 +756,10 @@ class ApplicationWindow(GraphWindow):
             erange=[self.instr.pixtable[i] for i in self.anrange]
             if erange[0]>erange[1]: erange=erange[::-1]
             if rc.thick_estimator=='humlicek': 
-                from spectrax import run_external
-                res=run_external([self.instr.last],self.instr.pixtable,ox=erange)[0]
+                res=sx.run_external([self.instr.last],self.instr.pixtable,ox=erange)[0]
         else:
             if rc.thick_estimator=='humlicek': 
-                from spectrax import run_external
-                res=run_external([self.instr.last],self.instr.pixtable,ox=rc.oxide_sel)[0]
+                res=sx.run_external([self.instr.last],self.instr.pixtable,ox=rc.oxide_sel)[0]
             erange=rc.eranges[rc.oxide_sel]
         thck=0
         if res==-1:
@@ -786,7 +806,7 @@ class ApplicationWindow(GraphWindow):
 #----------------------------------------------------------
     def zero_anal_data(self):
         from numpy import zeros
-        from spectrax import anal_data
+        from scanner.spectrax import anal_data
         xdim,ydim=self.control['nx'],self.control['ny']
         anal_data['mean']=zeros((xdim,ydim))#((2*self.control['nx']-1,2*self.control['ny']-1))
         anal_data['vari']=zeros((xdim,ydim))
@@ -806,7 +826,10 @@ class ApplicationWindow(GraphWindow):
         '''scanning process using (linear and rotation) motors
         '''
         if self.instr==None: self.initSpec()
-        import spectrax
+        #try:
+        #    from scanner import spectrax as sx
+        #except:
+        #    import spectrax as sx
         if not hasattr(self,'scandial'): #
             if self.polar: self.scandial=spectrax.ScanDial(rc.rad_pts,rc.theta_pts,0,polar=True)
             else: self.scandial=spectrax.ScanDial(rc.x_pts,rc.y_pts,rc.sample_radius)
@@ -830,7 +853,7 @@ class ApplicationWindow(GraphWindow):
                 self.gui['scanwin']=window
                 window.clear()
         self.zero_anal_data()
-        if hasattr(self.instr.config,'Material') and self.instr.config.Material=='simu':
+        if hasattr(self.instr.config,'Material') and self.instr.config.Material==b'simu':
             self.control['wait']=rc.simu_wait
         #
         if self.multitask:
@@ -864,10 +887,9 @@ class ApplicationWindow(GraphWindow):
                 print('cannot find calib. file '+cname)
                 return
             if rc.thick_estimator=='munz':
-                from spectrax import save_period,anal_data
                 if self.anrange==None: excomm="anal.range %.2f-%.2f"%(self.instr.pixtable[self.erange[0]],self.instr.pixtable[self.erange[1]])
                 else: excomm="anal.range %.2f-%.2f"%(self.instr.pixtable[self.anrange[0]],self.instr.pixtable[self.anrange[1]])
-                save_period(cname.replace("calib","period"),anal_data['peri'],anal_data['peri_disp'],comment=excomm)
+                sx.save_period(cname.replace("calib","period"),sx.anal_data['peri'],sx.anal_data['peri_disp'],comment=excomm)
             else:
                 self.scanPeri(cname)
                 print('finished thickness analysis using '+cname)
@@ -986,15 +1008,16 @@ class ApplicationWindow(GraphWindow):
         
     def upload(self,npoints=200):
         '''uploading data to database'''
-        server='pythagoras.physics.muni.cz'
+        server='cuda.physics.muni.cz'
 ##-----------------------------------------------------------------------------------------------
 
-    def initSpec(self,do_termo=False,show_comm=True,instrname='avantes',reset_instr=True):
+    def initSpec(self,do_termo=False,show_comm=True,instrname=None,reset_instr=True):
         '''initialization process'''
         self.statusBar().showMessage("Testing spectrometer...")
         if reset_instr and self.instr!=None:
             self.instr.end()
             self.instr=None
+        if instrname==None: instrname=rc.instrname
         if self.instr==None: 
         # here we create instrument instance
             if instrname=='avantes':
@@ -1003,6 +1026,10 @@ class ApplicationWindow(GraphWindow):
                     print('starting linux bypass')
                 else:
                     self.instr=labin.avantes()
+            elif instrname=='jaz':
+                self.instr=labin.oceanjaz()
+            elif instrname=='ocean':
+                self.instr=labin.ocean()
             else:
                 if hasattr(rc,'simu_bins'): nbin= rc.simu_bins
                 else: nbin=None
@@ -1047,7 +1074,7 @@ class ApplicationWindow(GraphWindow):
                     aw.setUnit(upos) 
                     self.unitModes.setCurrentIndex(upos)
 
-        self.statusBar().showMessage("Spectrometer OK!")
+        self.statusBar().showMessage("Spectrometer %s OK!"%self.instr.name)
         
     def setDark(self):
         if self.instr!=None: self.instr.dark=self.instr.result(sub_dark=False,div_flat=False,smooth=rc.soft_smooth)
@@ -1165,7 +1192,7 @@ class ApplicationWindow(GraphWindow):
                 d, ok = QtGui.QInputDialog.getInteger(self, self.tr("dynamic dark"),self.tr("remembered percentage"), val, 0, 100, 1)
                 #self.instr.config.m_CorDynDark.m_ForgetPercentage=int(d)
             else: d=0
-        self.instr.setup(None,integ=self.intime,aver=self.mean,dyndark=d,smooth=self.smooth,unit=self.xunit)
+            self.instr.setup(None,integ=self.intime,aver=self.mean,dyndark=d,smooth=self.smooth,unit=self.xunit)
 
     def averaging(self):
         self.mean=self.avgcnt.value()
@@ -1228,9 +1255,7 @@ class ApplicationWindow(GraphWindow):
     # ---------------- external tools
     
     def showExtra(self):
-        from spectrax import AnalyseWindow
-        from numpy import array
-        task=AnalyseWindow()
+        task=sx.AnalyseWindow()
         if self.instr!=None:
             task.data=self.instr.last
             if task.data==None:
@@ -1251,9 +1276,9 @@ class ApplicationWindow(GraphWindow):
         task.parent=self
         self.analyse=task
         task.show()
+        
     def showExtraMap(self):
-        from spectrax import AnalyseWindow
-        task=AnalyseWindow(mode='scan')
+        task=sx.AnalyseWindow(mode='scan')
         task.parent=self
         self.analyse=task
         task.show()
@@ -1263,6 +1288,8 @@ class ApplicationWindow(GraphWindow):
         providing some basic characteristic in StatusBar (for peak analysis)
         '''
         bound=self.graph.hscale
+        if bound==None: bound=self.graph.axes.get_xlim()
+
         from spectra import get_ids
         if self.instr==None:
             alert("x-axis not initialized yet")
@@ -1295,8 +1322,11 @@ class ApplicationWindow(GraphWindow):
         self.temp=self.termo(close=False)
         
     def scripted(self):
-        from spectrax import ScriptWindow
-        window = ScriptWindow()
+        #try: 
+        #    import spectrax as sx
+        #except:
+        #    import scanner.spectrax as sx
+        window = sx.ScriptWindow()
         window.resize(640, 480)
         window.createSample()
         self.script=window
@@ -1380,7 +1410,7 @@ class StackWin(QtGui.QMainWindow):
         self.setWindowTitle("List of measurements")
         self.main_widget = QtGui.QWidget(self)
         self.layout = QtGui.QVBoxLayout(self.main_widget)
-        self.topLabel = QtGui.QLabel(self.tr("Opened %1 files:").arg(len(stack)))
+        self.topLabel = QtGui.QLabel(self.tr("Opened %i files:"%(len(stack))))
         self.layout.addWidget(self.topLabel)
         delButton = QtGui.QPushButton(self.tr("&Remove"))
         pltButton = QtGui.QPushButton(self.tr("&Plot"))
@@ -1463,7 +1493,7 @@ class StackWin(QtGui.QMainWindow):
         if color in scmap: color=scmap[color]
         ite.setTextColor(QtGui.QColor(color))
         #self.parent.connect(ite, QtCore.SIGNAL("itemDoubleClicked()"), self.list.openPersistentEditor(ite))
-        self.topLabel.setText(self.tr("%1 spect. in stack").arg(len(self.parent.stack)))
+        self.topLabel.setText(self.tr("%i spect. in stack"%(len(self.parent.stack))))
 
     def showlist(self,type='list',app=None):
         if app==None:
@@ -1478,7 +1508,7 @@ class StackWin(QtGui.QMainWindow):
             self.additem(id=i)
         #self.list=app.listBox
         #self.stack=app.stack
-        self.topLabel.setText(self.tr("%1 spectra in stack").arg(len(self.parent.stack)))
+        self.topLabel.setText(self.tr("%i spect. in stack"%(len(self.parent.stack))))
         self.show()
         return self
     def closeEvent(self, ce):
@@ -1499,7 +1529,7 @@ def run(range=None,init=False,refname=None,loadname=[],extra=None):
     aw.show() 
     if init: 
         if extra=='sim': aw.initSpec(instrname='simula')
-        else: aw.initSpec()
+        else: aw.initSpec(instrname=rc.instrname)
     if refname: aw.loadRefer('real',refname)
     if len(loadname)>0:
         aw.graph.axes.cla()
@@ -1509,9 +1539,9 @@ def run(range=None,init=False,refname=None,loadname=[],extra=None):
             xdat=aw.loadData(name=l,type='real')[0]
         aw.graph.axes.set_xlim(xdat[0],xdat[-1])
     if extra=='sim':
-        aw.instr.config.Material=rc.simu_calib
+        aw.instr.config.Material=bytes(rc.simu_calib,'ascii')
         aw.setReference()
-        aw.instr.config.Material='simu'
+        aw.instr.config.Material=b'simu'
         #ite=aw.stack.keys()[0]
         #aw.graph.axes.set_xlim(aw.stack[ite].get_xdata().min(),aw.stack[ite].get_xdata().max())
 
@@ -1520,7 +1550,8 @@ if __name__=="__main__":
     #pylab_setup()
     aw = ApplicationWindow()
     aw.setWindowTitle("PyAvaSpec")
-    if '--init' in sys.argv: aw.initSpec()
-    else: aw.show()
+    if '--simu' in sys.argv: aw.initSpec(instrname='simula')
+    elif '--init' in sys.argv: aw.initSpec(instrname=rc.instrname)
+    aw.show()
     sys.exit(qApp.exec_())
     #qApp.exec_()

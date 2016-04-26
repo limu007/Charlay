@@ -86,8 +86,9 @@ ref_sample=3 # taking every ref_sample point from tables above
 #--------------------------------------------------
 ooihome='/opt/OmniDriver/OOI_HOME'
 java_jdk='/usr/local/lib/jdk'
-java_home='/opt/OmniDriver/_jvm'
+java_home='/opt/OmniDriver/OOI_HOME/_jvm'
 java_jvm='/usr/local/lib64/libjvm.so'
+java_jvm='/opt/OmniDriver/OOI_HOME/_jvm/lib/amd64/server/libjvm.so'
 cool_temp=0
 
 #--------------------------------------------------

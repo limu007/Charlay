@@ -271,7 +271,7 @@ def filter(dat,xb=None,min_sig=0,sub_band=None,pol_deg=2,min_ampl=1.,init_wid=0,
 
 def basel(lst,rep,bas,lim,ord=1,fit=None):
     '''baseline subtraction below peaks
-    currectly lorentzian/gaussian fit to peaks available
+    currently lorentzian/gaussian fit to peaks available
     lst: list of names
     rep: repository
     bas: x-axis baseline

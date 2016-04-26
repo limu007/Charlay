@@ -92,6 +92,7 @@ class SimpleConfigType(Structure): #MeasConfigType
 polycal=[ -3.46472e-10, -5.39531e-06, 3.44907e-01, 1.748616e+02] # fit of pixel2waveleng. dependence for AvaSpec-3648
 global specdata
 specdata=None
+pos_calib=[0,0]
 
 class specscope(object):
     '''generic class what every spectroscope should do 
@@ -132,11 +133,15 @@ class specscope(object):
             self.config.m_StartPixel,self.config.m_StopPixel=tuple(prange)
         self.config.m_IntegrationTime=int(integ)
         self.config.m_NrAverages=int(aver)
+        self.config.Material=b'simu'
         #if 'aver' in kwargs: self.config.m_NrAverages=int(kwargs['aver'])
         return
     def measure(self,npix=None,**kwargs):
         from numpy.random import normal
         from math import sqrt
+        if self.config==None:
+            print("You must config first!")
+            return
         if 'noise' in kwargs: noise=float(kwargs['noise'])
         else: noise=getattr(self.config,'Noise',0.05)
         noise/=sqrt(self.config.m_NrAverages)
@@ -163,21 +168,22 @@ class specscope(object):
                     if hasattr(rc,'simu_layer_fluc'): wid=[wid[i]*normal(1,rc.simu_layer_fluc[i]) for i in range(len(wid))]
                     rep+=plate(self.pixtable,[self.data[m] for m in mater],wid)
             else:
-                if mater in rc.mod_ext: 
-                    from numpy import polyval
-                    self.data[mater]=polyval(rc.mod_ext[mater],self.pixtable)**2
-                else:
-                    from spectra import dbload
-                    if type(mater)==bytes: dbname=mater.decode('ascii')
-                    else: dbname=mater
-                    if dbname in rc.eps_trans: dbname=rc.eps_trans[dbname]
-                    try:
-                        inp=dbload(dbname,self.pixtable)
-                    except:
-                        print('cannot load material '+dbname)
-                        return rep
-                    #for i in range(len(inp)):
-                    self.data[mater]=inp[1]
+                if not mater in self.data:
+                    if mater in rc.mod_ext: 
+                        from numpy import polyval
+                        self.data[mater]=polyval(rc.mod_ext[mater],self.pixtable)**2
+                    else:
+                        from spectra import dbload
+                        if type(mater)==bytes: dbname=mater.decode('ascii')
+                        else: dbname=mater
+                        if dbname in rc.eps_trans: dbname=rc.eps_trans[dbname]
+                        try:
+                            inp=dbload(dbname,self.pixtable)
+                        except:
+                            print('cannot load material '+dbname)
+                            return rep
+                        #for i in range(len(inp)):
+                        self.data[mater]=inp[1]
                 if len(self.data)>0:
                     from profit import reflect
                     rep+=reflect(self.data[mater])#,self.data[mater[1]])
@@ -365,11 +371,13 @@ class specscope(object):
                 if dela<0: dela=0.1
 
     def scan_save(self,xstep=-500,ystep=500,xcnt=50,ycnt=50,radius=0,oname='C:\\Users\\Lenovo\\Documents\\Data\\quad_line',
-                center=False,format='txt',control=None,swapaxes=False,centerfirst=False):
+                center=False,format='txt',control=None,swapaxes=False,centerfirst=False,debug=False,returnlast=False,recalib=0):
             ''' 2-d scanning of the sample - saving each row in separate file (given by oname)
             if radius>0: X-Y coverage of circular wafer
+                now radius in stepper counts
             if swapaxes: scanning second dir. first
             if centerfirst: just one point in first line (center)
+            if returnlast: return to original position after scan
             '''
             from numpy import array,save,zeros,savetxt
             from math import sqrt
@@ -379,6 +387,7 @@ class specscope(object):
             #global gx,gy
             self.gx,self.gy=0,0
             global meas_line
+            ofile=None
             if format=='txt': #hack for saving in text format
                 def save(a,b):
                     ouf=open(a+".txt","w")
@@ -386,6 +395,9 @@ class specscope(object):
                         ouf.write("#"+"  ".join(["pnt%i"%i for i in range(1,len(b)+1)])+'\n') #writing header
                     savetxt(ouf,b.transpose(),fmt="%8.5f")
                     ouf.close()
+            elif format=='pts':
+                ofile=open(oname,"w")
+                ofile.write("[%i,%i]\n"%(self.gx,self.gy))
             #rate=newrate
             if swapaxes: xdir,ydir=2,1
             else: xdir,ydir=1,2
@@ -394,30 +406,57 @@ class specscope(object):
                 control['nx']=xcnt #is OK for round samples ??
                 control['ny']=ycnt
                 if 'stop' in control: del control['stop']
+            pos_cent=[0,0]
+            pos_beg=[self.gx,self.gy]
             if radius>0: # round sample
-                if center: self.rate(ydir,-radius*ystep)
-                if radius<ycnt-1: ycnt=radius+1
-                if radius<xcnt-1: xcnt=radius+1
+                if center: self.rate(ydir,-radius)
+                if radius<ycnt*ystep-1: ycnt=radius//ystep+1
+                if radius<xcnt*xstep-1: xcnt=radius//xstep+1
                 xmin,xmax=-xcnt+1,xcnt
                 ymin,ymax=-ycnt+1,ycnt
             else:
                 xmin,xmax=0,xcnt
                 ymin,ymax=0,ycnt
+            if testonly: print("scan in range %i-%i/%i-%i"%(xmin,xmax,ymin,ymax))
+            nmeas=0
+            step_virtual=[0,0]
             for j in range(ymin,ymax):
                     meas_line=[]
+                    pos_line=[]
                     k=0
                     for i in range(xmin,xmax):
-                        if ((radius>0) and (i**2+j**2)>radius**2) or (centerfirst and i>xmin): 
-                            meas_line.append(zeros(self.pixtable.shape))
-                            # not measuring at this point - empty data
+                        if ((radius>0) and ((i*xstep-pos_cent[0])**2+(j*ystep-pos_cent[1])**2)>radius**2) or (centerfirst and i>xmin): 
+                            meas_line.append(zeros(self.pixtable.shape)) # not measuring at this point - empty data
+                            step_virtual[xdir-1]+=xstep
                             continue
                         if k!=0: 
-                            self.rate(xdir,xstep)
+                            step_virtual[xdir-1]+=xstep
                             #print('going '+str(xdir)+' '+str(xstep))
                         else: k=1  # first point in the line
+                        if step_virtual[xdir-1]!=0: #realize all delayed moves
+                            self.rate(xdir,step_virtual[xdir-1])
+                        if step_virtual[ydir-1]!=0: #realize all delayed moves
+                            self.rate(ydir,step_virtual[ydir-1])
+                        step_virtual=[0,0]
                         if control and 'stop' in control: break
                         ############ measurement #######################
                         meas_line.append(self.result())
+                        nmeas+=1
+                        pos_line.append("[%i,%i]"%(self.gx,self.gy))
+                        if recalib>0 and nmeas%recalib==0: # go to calibration point
+                            pos_act=[self.gx,self.gy]
+                            self.rate(1,pos_calib[0]-pos_act[0])
+                            self.rate(2,pos_calib[1]-pos_act[1])
+                            #self.rate(xdir,pos_calib[0]-pos_act[0])
+                            #self.rate(ydir,pos_calib[1]-pos_act[1])
+                            newflat=self.measure()
+                            if self.flat!=None:
+                                ratio=newflat/self.flat
+                                print("recalib. by fact. %.3f"%ratio.mean())
+                            self.flat=newflat
+                            pos_line.append("[%i,%i]"%(self.gx,self.gy))
+                            self.rate(1,-pos_calib[0]+pos_act[0])
+                            self.rate(2,-pos_calib[1]+pos_act[1])
                         #print('just measured %i %i'%(i,j))
                         if control:
                             if 'wait' in control: sleep(control['wait']) 
@@ -453,11 +492,15 @@ class specscope(object):
                             save(oname+"%03i"%(j+1),array(meas_line))
                         else:
                             save(oname+"%03i"%(j+ycnt),array(meas_line))
-                    if radius<=0:
+                    else:
+                        if ofile!=None: ofile.write("\t".join(pos_line)+"\n")
+                    if radius<0: #nevim proc to tu je
                         if j>=radius: break
                         if j<-radius: continue
                         self.rate(xdir,xstep*(int(sqrt(radius**2-(j+1)**2))-int(sqrt(radius**2-j**2))))
-                    if j<ycnt-1:self.rate(ydir,ystep)
+                    #print("now next line")
+                    if j<ycnt-1:
+                        step_virtual[ydir-1]+=ystep
                     if not(rc.polar_stage and rc.single_central_pt and (j==0)): 
                         xstep=-xstep
             if control:
@@ -476,6 +519,12 @@ class specscope(object):
             if hasattr(self,'pixtable') and self.config.Material.decode('ascii')!='simu': #saving calibration data
                 if self.flat==None: save(oname+"calib",self.pixtable)
                 else: save(oname+"calib",array([self.pixtable,self.flat]))
+            if returnlast:
+                self.rate(1,pos_beg[0]-self.gx)
+                self.rate(2,pos_beg[1]-self.gy)
+            if ofile!=None:
+                if returnlast:  ofile.write("[%i,%i]\n"%(self.gx,self.gy))
+                ofile.close()
 
 class ocean(specscope):
     '''developped and tested for JAZ/NIRquest
